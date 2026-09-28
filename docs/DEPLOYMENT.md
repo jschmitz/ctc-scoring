@@ -222,6 +222,19 @@ Two vhost files, installed by hand as root (the deploy user can't touch nginx):
   `SMTP_SENDER_NAME=CTC Scoring`. Consider an `SMTP_ADMIN_EMAIL` on `runvaders.com` so links don't land in spam.
 - `PGRST_DB_SCHEMAS=public,graphql_public`
 - `RCLONE_REMOTE`: off-host backup target (see Backups)
+- `LOGIN_MODE`: unset for now (open login, below). Set to `magic-link` to restore email sign-in.
+
+### Temporary open login
+
+For now, `/login` asks only for an email and signs straight in. No email is sent, and any address
+works: `app/login/actions.ts` creates the user if needed, **adds the email to `staff`**, and starts a
+normal Supabase session, so RLS is unchanged. Every login is logged:
+`sudo docker compose -f /opt/ctc-scoring/docker-compose.yml logs app | grep '\[login\]'`.
+The app gets `SERVICE_ROLE_KEY` (as `SUPABASE_SERVICE_ROLE_KEY`) for this, so the Droplet's
+`docker-compose.yml` must be the current one.
+
+This means anyone who finds `/login` can enter scores. To turn it off: set `LOGIN_MODE=magic-link` in
+`.env`, run `up -d`, and delete the `staff` rows that shouldn't stay.
 
 ---
 

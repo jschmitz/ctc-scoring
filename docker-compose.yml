@@ -27,6 +27,10 @@ services:
       NODE_ENV: production
       # Server-only; the health check reaches Kong directly on the compose network.
       SUPABASE_INTERNAL_URL: http://kong:8000
+      # Server-only, for the temporary open login (app/login/actions.ts).
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      # Unset: open login (any email, no email sent). magic-link: email sign-in.
+      LOGIN_MODE: ${LOGIN_MODE:-}
       # Read by deploy/migrate.sh from the entrypoint. POSTGRES_DB is this
       # app's own database inside the shared Postgres instance.
       POSTGRES_HOST: ${POSTGRES_HOST}
