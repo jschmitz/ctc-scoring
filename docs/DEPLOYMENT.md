@@ -17,12 +17,15 @@ app container's entrypoint applies migrations, then starts Next.js
    ↓
 host nginx: TLS for ctc.runvaders.com
    /                         → app   127.0.0.1:8084
-   /auth /rest /realtime     → kong  127.0.0.1:8085  (self-hosted Supabase)
+   /auth/v1 /rest/v1 /realtime/v1 → kong 127.0.0.1:8085  (self-hosted Supabase)
 ```
 
 The architecture (components, request flows, trust boundaries, failure modes) is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
-Status: **plan only**. None of the files below exist yet. See [Work to do in this repo](#work-to-do-in-this-repo).
+Status: **built and rehearsed locally, not yet deployed.** All the files below exist. The whole stack has
+been run locally through `deploy/local/stack.sh`: migrate-on-boot, bootstrap, magic-link sign-in over SMTP,
+staff writes, anonymous writes refused, the live leaderboard over WebSocket, and a backup dump. What's left is
+the Droplet-side first-time setup below.
 
 ---
 
@@ -148,6 +151,22 @@ as user `ctc-scoring` runs `/opt/ctc-scoring/deploy.sh ${{ github.sha }}`.
 
 ---
 
+### Fixes compared with food-shopper's config
+
+Running the copied config locally turned up four bugs that food-shopper's (not yet booted) production
+stack shares. All four are fixed here:
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| GoTrue crash-loops with `must be owner of function uid`; app migration fails with `auth.jwt() does not exist` | `roles.sql` alters `supabase_functions_admin`, which only exists if upstream's `webhooks.sql` runs first. The error aborts the image's remaining init scripts. | Line removed from `deploy/volumes/db/roles.sql` |
+| Kong: `in '_format_version': expected a string` | Kong's entrypoint expands `kong.yml` with an eval'd `echo "…"`, which strips double quotes | `kong.yml` uses single quotes and contains no double quotes at all, comments included |
+| Realtime: `System.EnvError METRICS_JWT_SECRET` | Required by this Realtime version | `METRICS_JWT_SECRET: ${JWT_SECRET}` in compose |
+| Magic link lands on Kong's 404 `no Route matched` | nginx `^/(auth\|…)/` also catches the app's own `/auth/callback` | nginx matches only `^/(auth\|rest\|realtime)/v1/` |
+
+Also: `app` now waits for `auth` to be healthy, because GoTrue creates the auth schema that the app's migrations use.
+
+---
+
 ## The deploy script and deploy user
 
 `deploy/deploy.sh` is food-shopper's with the paths changed. It sets `IMAGE_TAG=<sha>` in `.env`, then runs
@@ -166,8 +185,9 @@ Never edit an applied migration; add a new one.
 
 ## nginx and TLS
 
-A new vhost, `deploy/nginx-ctc.runvaders.com.conf`, installed by hand as root (the deploy user can't touch nginx).
-It uses middle-school-track's certbot sequence, scoped to the one hostname:
+Two vhost files, installed by hand as root (the deploy user can't touch nginx):
+`deploy/nginx-ctc.runvaders.com.http-only.conf` (to get the certificate) and then
+`deploy/nginx-ctc.runvaders.com.conf`. Both pass `nginx -t`. The sequence is middle-school-track's certbot flow, scoped to the one hostname:
 
 1. DNS: an **A record `ctc` → Droplet IP** in the `runvaders.com` zone.
 2. Install an HTTP-only vhost for `ctc.runvaders.com` that serves `/.well-known/acme-challenge/` from
@@ -176,11 +196,11 @@ It uses middle-school-track's certbot sequence, scoped to the one hostname:
    runvaders.com's cert isn't touched.
 4. Replace the vhost with the full HTTPS config:
    - `listen 80` → 301 to https
-   - `location /` → `127.0.0.1:8084` with `Host`, `X-Forwarded-For`, and `X-Forwarded-Proto` set. The
-     magic-link callback builds its redirect from these headers.
-   - `location ~ ^/(auth|rest|realtime)/` → `127.0.0.1:8085` with `proxy_http_version 1.1`,
+   - `location /` → `127.0.0.1:8084` with `Host`, `X-Forwarded-Host`, `X-Forwarded-For`, and
+     `X-Forwarded-Proto` set. The magic-link callback builds its redirect from these headers.
+   - `location ~ ^/(auth|rest|realtime)/v1/` → `127.0.0.1:8085` with `proxy_http_version 1.1`,
      `Upgrade` / `Connection "upgrade"`, and `proxy_read_timeout 3600s`. Without the upgrade headers,
-     Realtime silently never connects. This is food-shopper's snippet minus the upload size limit.
+     Realtime silently never connects. Only the `/v1/` prefixes: the app's own `/auth/callback` must reach the app.
 5. Renewal is handled by certbot's existing systemd timer on the Droplet, the same as for the other certs.
 
 ---
@@ -207,26 +227,46 @@ It uses middle-school-track's certbot sequence, scoped to the one hostname:
 
 ## First-time setup (in order)
 
+Run these on the Droplet as root unless noted. `$REPO` is a local checkout of this repo.
+
 1. **Headroom check.** Run `free -h` and `docker stats --no-stream`, and resize the Droplet if needed (see "The Droplet").
 2. **DNS.** Add the A record `ctc.runvaders.com` → Droplet IP, and wait until `host ctc.runvaders.com` resolves.
-3. **Deploy user** (as root): `adduser --disabled-password ctc-scoring`, add the new public key to its
-   `authorized_keys`, create `/etc/sudoers.d/ctc-scoring` with the scoped compose commands, and make
-   `/opt/ctc-scoring` owned by `ctc-scoring`.
-4. **Files.** Copy `docker-compose.yml` and `deploy/` (`deploy.sh`, `backup.sh`, `gen-keys.sh`,
-   `crontab.example`, `volumes/`) to `/opt/ctc-scoring/`, with `deploy.sh` at `/opt/ctc-scoring/deploy.sh`.
-5. **Secrets.** Run `./deploy/gen-keys.sh`, write `.env` from `deploy/.env.example`, then `chmod 600 .env`.
+3. **Deploy user and sudo.**
+   ```bash
+   adduser --disabled-password --gecos "" ctc-scoring
+   install -d -m 700 -o ctc-scoring -g ctc-scoring /home/ctc-scoring/.ssh
+   # paste the new deploy key's PUBLIC half into /home/ctc-scoring/.ssh/authorized_keys (mode 600, owned by ctc-scoring)
+   visudo -cf /tmp/sudoers.ctc-scoring && install -m 440 /tmp/sudoers.ctc-scoring /etc/sudoers.d/ctc-scoring
+   install -d -o ctc-scoring -g ctc-scoring /opt/ctc-scoring
+   ```
+   Copy `deploy/sudoers.ctc-scoring` to `/tmp/` first. Also check `which docker` is `/usr/bin/docker`, since sudoers matches the full path.
+4. **Files.** From your machine:
+   ```bash
+   scp $REPO/docker-compose.yml root@DROPLET:/opt/ctc-scoring/
+   scp -r $REPO/deploy root@DROPLET:/opt/ctc-scoring/
+   ```
+   Then on the Droplet: `cp /opt/ctc-scoring/deploy/deploy.sh /opt/ctc-scoring/deploy.sh`,
+   `chown -R ctc-scoring:ctc-scoring /opt/ctc-scoring`, and `rm -rf /opt/ctc-scoring/deploy/local` (local rehearsal only).
+5. **Secrets.** Run `/opt/ctc-scoring/deploy/gen-keys.sh`, write `/opt/ctc-scoring/.env` from `deploy/.env.example`
+   with those values, a fresh `POSTGRES_PASSWORD` (`openssl rand -hex 32`), and the SMTP relay. Then
+   `chmod 600 .env && chown ctc-scoring .env`.
 6. **GitHub secrets.** Set the six listed above. `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` must equal `ANON_KEY`.
+   In the repo: `gh secret set NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` and so on.
 7. **nginx and cert.** Follow steps 2–4 under "nginx and TLS".
-8. **First deploy.** Push to `main` and watch the workflow. On the Droplet:
-   `sudo docker compose -f /opt/ctc-scoring/docker-compose.yml ps` shows only
-   `127.0.0.1:8084` and `127.0.0.1:8085` published, and `logs app` shows both migrations applying.
-9. **Bootstrap data** (once, as root, via `docker compose exec db psql`): run `deploy/bootstrap.sql`
-   (see "Work to do"). It inserts the first staff email and the CTC 2026 event with its six challenges.
-   Real teams are entered in Setup.
-10. **Smoke test.** Open `https://ctc.runvaders.com/api/health` (200). Sign in with a real magic link,
-    open the leaderboard on a phone, enter a test score on a laptop, and confirm it appears on the phone
-    within a second. Then delete the test score.
-11. **Backups.** Run `sudo crontab deploy/crontab.example` as root, then restore-test once (see below).
+8. **First deploy.** Push to `main` and watch the workflow. The `ship` job ends by polling
+   `https://ctc.runvaders.com/api/health`. On the Droplet,
+   `sudo docker compose -f /opt/ctc-scoring/docker-compose.yml ps` should show only
+   `127.0.0.1:8084` and `127.0.0.1:8085` published, and `logs app` should show both migrations applying.
+9. **Bootstrap data** (once):
+   ```bash
+   cd /opt/ctc-scoring
+   docker compose exec -T db psql -U supabase_admin -d postgres -v staff_email=you@example.com < deploy/bootstrap.sql
+   ```
+   It's safe to re-run. It adds the first staff email and the CTC 2026 event with its six challenges. Enter real teams in Setup.
+10. **Smoke test.** Sign in with a real magic link, open the leaderboard on a phone, enter a test score on a laptop, and
+    confirm it appears on the phone within a second. Then delete the test score.
+11. **Backups.** Add `deploy/crontab.example` to root's crontab (append it; root may already have food-shopper's entries),
+    then restore-test once (see below).
 
 ---
 
@@ -241,6 +281,25 @@ For this app, the backup that matters most is **the night after the event**. Als
 
 Restore-test once before trusting it:
 `gunzip -c <file> | docker compose exec -T db psql -U supabase_admin -d postgres` into a local stack.
+
+---
+
+## Rehearse locally
+
+`deploy/local/stack.sh` runs the production `docker-compose.yml` on your Mac with a small override
+(`deploy/local/compose.yml`). The override builds the app image, adds an nginx gateway that mirrors the Droplet's
+vhost routing, and adds Mailpit as the SMTP relay. Use it to try any change to the compose file, `deploy/`, or
+migrations before it reaches the Droplet.
+
+```bash
+deploy/local/stack.sh up -d --build        # first run generates deploy/local/.env (git-ignored)
+deploy/local/stack.sh exec -T db psql -U supabase_admin -d postgres -v staff_email=staff@example.com < deploy/bootstrap.sql
+open http://ctc.localhost:8086             # sign-in emails: http://127.0.0.1:8087
+deploy/local/stack.sh down -v              # stop and delete local data
+```
+
+It uses ports 8084–8087 on 127.0.0.1 and the compose project name `ctc-scoring-local`, separate from
+`supabase start` (544xx) and the dev server (3001).
 
 ---
 
@@ -281,19 +340,21 @@ This app is idle all year and busy for one day, so it gets a checklist the other
 
 ## Work to do in this repo
 
-Needed before the first deploy:
+Done:
 
-- [ ] `next.config.ts`: add `output: "standalone"`.
-- [ ] `app/api/health/route.ts`: a database round trip through `/rest/v1/`, like food-shopper's.
-- [ ] `Dockerfile`, `.dockerignore` (from food-shopper, npm instead of pnpm).
-- [ ] `docker-compose.yml`: trimmed stack, no `container_name`, a realtime network alias, ports 8084/8085.
-- [ ] `deploy/`: `deploy.sh`, `docker-entrypoint.sh`, `migrate.sh`, `gen-keys.sh`, `backup.sh`,
-      `crontab.example`, `.env.example`, `nginx-ctc.runvaders.com.conf`, `volumes/db/*.sql`,
-      `volumes/api/kong.yml`.
-- [ ] `deploy/bootstrap.sql`: the CTC 2026 event and challenges from `supabase/seed.sql` (without
-      the sample teams or `staff@example.com`), plus a placeholder for the first real staff email.
-- [ ] `.github/workflows/deploy.yml`: `verify` then `ship`.
-- [ ] README: link here, and drop the old Vercel-based "Deploying" section.
+- [x] `next.config.ts`: `output: "standalone"`.
+- [x] `app/api/health/route.ts`: a round trip through Kong and PostgREST to Postgres, via `SUPABASE_INTERNAL_URL`.
+- [x] `Dockerfile`, `.dockerignore`.
+- [x] `docker-compose.yml`: trimmed stack, no `container_name`, a realtime network alias, ports 8084/8085.
+- [x] `deploy/`: `deploy.sh`, `docker-entrypoint.sh`, `migrate.sh`, `gen-keys.sh`, `backup.sh`, `crontab.example`,
+      `.env.example`, `sudoers.ctc-scoring`, both nginx vhosts, `volumes/db/*.sql`, `volumes/api/kong.yml`.
+- [x] `deploy/bootstrap.sql`: first staff email plus the CTC 2026 event and challenges. Idempotent.
+- [x] `deploy/local/`: local rehearsal of the production stack.
+- [x] `.github/workflows/deploy.yml`: `verify` then `ship`, with a post-deploy health check. actionlint-clean.
+- [x] README points here.
+
+Not yet verified: the `linux/amd64` build (CI builds it; the local rehearsal built the native arm64 image
+from the same Dockerfile) and anything that needs the Droplet itself.
 
 Nice to have:
 - [ ] Playwright e2e for sign-in, score entry, and the live leaderboard, run in `verify` against `supabase start`.

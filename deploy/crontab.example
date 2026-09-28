@@ -1,0 +1,7 @@
+# Install as ROOT's crontab (backup.sh uses `docker compose exec`, which the
+# ctc-scoring user's scoped sudo doesn't allow). If root already has a crontab
+# (food-shopper's), append this line instead of replacing it:
+#   sudo crontab -l | cat - /opt/ctc-scoring/deploy/crontab.example | sudo crontab -
+#
+# m  h  dom mon dow  command
+30 3  *   *   *     /opt/ctc-scoring/deploy/backup.sh >>/var/log/ctc-scoring-backup.log 2>&1

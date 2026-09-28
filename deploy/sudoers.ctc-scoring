@@ -1,0 +1,11 @@
+# /etc/sudoers.d/ctc-scoring (mode 440, install with `visudo -cf` first).
+# The deploy user can run exactly these compose commands against this app's
+# compose file and nothing else. Same policy as food-shopper's deploy user.
+Cmnd_Alias CTC_COMPOSE = \
+  /usr/bin/docker compose -f /opt/ctc-scoring/docker-compose.yml pull, \
+  /usr/bin/docker compose -f /opt/ctc-scoring/docker-compose.yml up -d, \
+  /usr/bin/docker compose -f /opt/ctc-scoring/docker-compose.yml down, \
+  /usr/bin/docker compose -f /opt/ctc-scoring/docker-compose.yml restart, \
+  /usr/bin/docker compose -f /opt/ctc-scoring/docker-compose.yml ps, \
+  /usr/bin/docker compose -f /opt/ctc-scoring/docker-compose.yml logs *
+ctc-scoring ALL=(root) NOPASSWD: CTC_COMPOSE

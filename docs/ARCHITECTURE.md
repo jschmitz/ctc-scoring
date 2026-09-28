@@ -4,8 +4,8 @@ What runs where, how requests move through it, and why it's shaped this way.
 The step-by-step setup, secrets, and event-day runbook are in [DEPLOYMENT.md](DEPLOYMENT.md). This document is
 the map that plan implements.
 
-Status: **target architecture**. Local development already runs this shape through `supabase start`;
-production isn't built yet (see DEPLOYMENT.md, "Work to do in this repo").
+Status: **built, rehearsed locally, not yet on the Droplet.** `deploy/local/stack.sh` runs this exact
+topology on a laptop, with an nginx container standing in for host nginx and Mailpit for SMTP (see DEPLOYMENT.md, "Rehearse locally").
 
 ---
 
@@ -29,7 +29,7 @@ in Postgres (row-level security plus two `SECURITY INVOKER` functions), so there
 ┌─ DigitalOcean Droplet (shared with 3 other apps) ──────────────────────────┐
 │                                ▼                                           │
 │  host nginx: TLS for ctc.runvaders.com (certbot); also serves the others   │
-│       │ /                            │ /auth  /rest  /realtime             │
+│       │ /                            │ /{auth,rest,realtime}/v1            │
 │       ▼ 127.0.0.1:8084               ▼ 127.0.0.1:8085                      │
 │ ┌─ compose project: ctc-scoring ─────────────────────────────────────────┐ │
 │ │  app                      kong: apikey check, CORS, routing            │ │
@@ -239,5 +239,6 @@ the first change is to refetch only `scores` on a change event instead of all fi
 ## Related
 
 - [DEPLOYMENT.md](DEPLOYMENT.md): setup steps, secrets, backups, rollback, event-day runbook
+- `docker-compose.yml`, `deploy/`: the stack, scripts, nginx vhosts, and `deploy/local/` for local rehearsal
 - `supabase/migrations/`: schema, RLS policies, `save_score`, `replace_rotation`
 - food-shopper `docs/DEPLOYMENT.md`: the reference implementation this follows

@@ -1,0 +1,39 @@
+# Local rehearsal of the production stack. Layered on the real docker-compose.yml
+# by deploy/local/stack.sh; nothing here is used on the Droplet.
+#
+# Adds what the Droplet provides outside compose:
+#   gateway: nginx standing in for host nginx, same path routing, plain HTTP
+#   mailpit: SMTP relay for magic links, inbox at http://127.0.0.1:8087
+# and builds the app image locally instead of pulling it.
+#
+# The app is served at http://ctc.localhost:8086. Browsers resolve *.localhost
+# to loopback, and extra_hosts points the app container's server-side calls
+# at the same gateway, mirroring the hairpin through nginx in production.
+
+services:
+  app:
+    image: ctc-scoring:local
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: http://ctc.localhost:8086
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${ANON_KEY}
+    extra_hosts:
+      - "ctc.localhost:host-gateway"
+
+  gateway:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8086:80"
+    volumes:
+      - ./deploy/local/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - app
+      - kong
+
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8087:8025"
