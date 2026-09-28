@@ -39,5 +39,5 @@ npm run lint
 ```
 
 ## Deploying
-Production runs on the shared DigitalOcean Droplet at https://ctc.runvaders.com, with a self-hosted Supabase stack next to the app.
+Production runs on the shared DigitalOcean Droplet at https://ctc-scoring.runvaders.com, with a self-hosted Supabase stack next to the app.
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the pieces fit together, and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the plan, first-time setup, and the event-day runbook.

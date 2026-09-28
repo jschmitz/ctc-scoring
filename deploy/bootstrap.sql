@@ -2,9 +2,12 @@
 -- with the six challenges from "CTC 2026 Challenge Rules.docx".
 -- Safe to re-run: every insert skips rows that already exist.
 --
--- Run as root on the Droplet after the first deploy (migrations must have applied):
+-- Run as root on the Droplet after the first deploy (migrations must have applied).
+-- No local `db` service: this app shares food-shopper's supabase-db container,
+-- so connect there directly, targeting this app's own database (ctc_scoring):
 --   cd /opt/ctc-scoring
---   docker compose exec -T db psql -U supabase_admin -d postgres \
+--   docker exec -T -e PGPASSWORD=$(grep '^POSTGRES_PASSWORD=' .env | cut -d= -f2-) \
+--     supabase-db psql -U supabase_admin -d ctc_scoring \
 --     -v staff_email=you@example.com < deploy/bootstrap.sql
 --
 -- Keep the challenge list in sync with supabase/seed.sql (local dev), which

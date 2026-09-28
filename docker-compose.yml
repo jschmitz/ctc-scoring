@@ -1,13 +1,23 @@
 # Production stack for ctc-scoring on the shared Droplet (/opt/ctc-scoring).
-# The app plus a trimmed self-hosted Supabase: db, auth, rest, realtime, kong.
+# The app plus auth, rest, realtime, kong -- pointed at the *shared* Postgres
+# instance already running as food-shopper's `db` (supabase-db), in its own
+# `ctc_scoring` database. There is no local `db` service here: this stack
+# reuses the shared cluster instead of running a second Postgres.
 # See docs/ARCHITECTURE.md for the picture and docs/DEPLOYMENT.md for setup.
 #
 # Only `app` and `kong` publish ports, and only on 127.0.0.1. Host nginx
-# (outside this file) terminates TLS for ctc.runvaders.com and proxies to them.
+# (outside this file) terminates TLS for ctc-scoring.runvaders.com and
+# proxies to them.
 #
 # No `container_name` anywhere: names are global on a Docker host, and
 # food-shopper's stack already uses supabase-db, supabase-auth, and so on.
-# Compose's project-prefixed names (ctc-scoring-db-1, ...) keep them apart.
+# Compose's project-prefixed names (ctc-scoring-app-1, ...) keep them apart.
+#
+# `app`, `auth`, `rest`, and `realtime` all need to reach the shared Postgres
+# (`db`/`supabase-db`), which lives on food-shopper's compose network and
+# publishes no host port. So they're attached to that network too, via the
+# external `supabase_net` alias below -- in addition to this project's own
+# default network, which `kong` uses to reach `auth`/`rest`/`realtime` by name.
 
 services:
   app:
@@ -17,7 +27,8 @@ services:
       NODE_ENV: production
       # Server-only; the health check reaches Kong directly on the compose network.
       SUPABASE_INTERNAL_URL: http://kong:8000
-      # Read by deploy/migrate.sh from the entrypoint.
+      # Read by deploy/migrate.sh from the entrypoint. POSTGRES_DB is this
+      # app's own database inside the shared Postgres instance.
       POSTGRES_HOST: ${POSTGRES_HOST}
       POSTGRES_PORT: ${POSTGRES_PORT}
       POSTGRES_DB: ${POSTGRES_DB}
@@ -30,56 +41,29 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    networks:
+      - default
+      - supabase_net
     depends_on:
-      db:
-        condition: service_healthy
-      # GoTrue sets up the auth schema on first boot; the app's migrations use auth.jwt().
+      # GoTrue owns the auth schema that the app's migrations use (auth.jwt()).
+      # No local `db` to depend on: the shared Postgres instance is already
+      # running and outside this compose project's lifecycle.
       auth:
         condition: service_healthy
       kong:
         condition: service_started
 
-  db:
-    image: supabase/postgres:17.6.1.136
-    restart: unless-stopped
-    healthcheck:
-      test: pg_isready -U postgres -h localhost
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    command:
-      - postgres
-      - -c
-      - config_file=/etc/postgresql/postgresql.conf
-      - -c
-      - log_min_messages=fatal # keeps Realtime's polling queries out of the logs
-    environment:
-      POSTGRES_HOST: /var/run/postgresql
-      PGPORT: ${POSTGRES_PORT}
-      POSTGRES_PORT: ${POSTGRES_PORT}
-      PGPASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      PGDATABASE: ${POSTGRES_DB}
-      POSTGRES_DB: ${POSTGRES_DB}
-      JWT_SECRET: ${JWT_SECRET}
-      JWT_EXP: ${JWT_EXPIRY}
-    volumes:
-      - ./deploy/volumes/db/roles.sql:/docker-entrypoint-initdb.d/init-scripts/99-roles.sql:ro
-      - ./deploy/volumes/db/jwt.sql:/docker-entrypoint-initdb.d/init-scripts/99-jwt.sql:ro
-      - ./deploy/volumes/db/realtime.sql:/docker-entrypoint-initdb.d/migrations/99-realtime.sql:ro
-      - db_data:/var/lib/postgresql/data
-
   auth:
     image: supabase/gotrue:v2.196.0
     restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9999/health"]
       timeout: 5s
       interval: 5s
       retries: 3
+    networks:
+      - default
+      - supabase_net
     environment:
       GOTRUE_API_HOST: 0.0.0.0
       GOTRUE_API_PORT: 9999
@@ -113,9 +97,9 @@ services:
   rest:
     image: postgrest/postgrest:v14.17
     restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
+    networks:
+      - default
+      - supabase_net
     environment:
       PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
       PGRST_DB_SCHEMAS: ${PGRST_DB_SCHEMAS}
@@ -129,16 +113,15 @@ services:
   realtime:
     image: supabase/realtime:v2.134.10
     restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
     # Realtime takes its tenant id from the first label of the hostname it's
     # reached at ("realtime-dev", the tenant SEED_SELF_HOST creates). Kong
-    # routes to this alias; see deploy/volumes/api/kong.yml.
+    # routes to this alias; see deploy/volumes/api/kong.yml. The alias only
+    # needs to exist on `default`, since that's the network kong is on.
     networks:
       default:
         aliases:
           - realtime-dev.ctc-realtime
+      supabase_net: {}
     healthcheck:
       test:
         [
@@ -197,12 +180,12 @@ services:
 
   # One-shot, never started by `up`: `docker compose run --rm migrate` for manual
   # use where `run` is allowed. Production migrates from the app's entrypoint.
+  # Points at the same shared Postgres instance as the other services.
   migrate:
     image: postgres:17
     profiles: ["tools"]
-    depends_on:
-      db:
-        condition: service_healthy
+    networks:
+      - supabase_net
     environment:
       POSTGRES_HOST: ${POSTGRES_HOST}
       POSTGRES_PORT: ${POSTGRES_PORT}
@@ -213,5 +196,10 @@ services:
       - ./deploy/migrate.sh:/migrate.sh:ro
     entrypoint: ["bash", "/migrate.sh"]
 
-volumes:
-  db_data:
+networks:
+  default: {}
+  # food-shopper's compose network. supabase-db (aliased "db") lives here and
+  # publishes no host port, so this is the only way to reach it.
+  supabase_net:
+    name: food-shopper_default
+    external: true

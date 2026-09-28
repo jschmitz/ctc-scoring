@@ -39,7 +39,7 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          NEXT_PUBLIC_SUPABASE_URL: https://ctc.runvaders.com
+          NEXT_PUBLIC_SUPABASE_URL: https://ctc-scoring.runvaders.com
           NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: build-check-placeholder
 
   ship:
@@ -83,8 +83,8 @@ jobs:
       - name: Health check
         run: |
           for _ in $(seq 1 20); do
-            if curl -fsS https://ctc.runvaders.com/api/health; then echo; exit 0; fi
+            if curl -fsS https://ctc-scoring.runvaders.com/api/health; then echo; exit 0; fi
             sleep 6
           done
-          echo "::error::https://ctc.runvaders.com/api/health did not return 200 within 2 minutes"
+          echo "::error::https://ctc-scoring.runvaders.com/api/health did not return 200 within 2 minutes"
           exit 1

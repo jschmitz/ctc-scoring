@@ -12,6 +12,8 @@ set -euo pipefail
 cd /opt/ctc-scoring
 
 RCLONE_REMOTE="$(grep -E '^RCLONE_REMOTE=' .env | cut -d= -f2- | sed 's/[[:space:]]*#.*//' || true)"
+POSTGRES_DB="$(grep -E '^POSTGRES_DB=' .env | cut -d= -f2- | sed 's/[[:space:]]*#.*//')"
+POSTGRES_PASSWORD="$(grep -E '^POSTGRES_PASSWORD=' .env | cut -d= -f2- | sed 's/[[:space:]]*#.*//')"
 BACKUP_ROOT="${BACKUP_ROOT:-/opt/ctc-scoring/backups}"
 DAILY_DIR="$BACKUP_ROOT/daily"
 MONTHLY_DIR="$BACKUP_ROOT/monthly"
@@ -24,7 +26,9 @@ chmod 700 "$BACKUP_ROOT"
 STAMP="$(date +%Y-%m-%d-%H%M)"
 DAILY_FILE="$DAILY_DIR/ctc-scoring-$STAMP.sql.gz"
 
-docker compose exec -T db pg_dump -U supabase_admin -d postgres | gzip >"$DAILY_FILE"
+# No local `db` service: this app shares food-shopper's supabase-db container,
+# dumping only this app's own database (ctc_scoring), not food-shopper's.
+docker exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" supabase-db pg_dump -U supabase_admin -d "$POSTGRES_DB" | gzip >"$DAILY_FILE"
 echo "backup: wrote $DAILY_FILE"
 
 if [ "$(date +%d)" = "01" ]; then

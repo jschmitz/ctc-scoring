@@ -13,7 +13,7 @@ topology on a laptop, with an nginx container standing in for host nginx and Mai
 
 One Next.js container plus a slimmed-down self-hosted Supabase stack (Postgres, Auth, PostgREST, Realtime,
 Kong), all in one Docker Compose project on the shared DigitalOcean Droplet. The host's nginx terminates TLS
-for `ctc.runvaders.com` and splits traffic by path: pages go to the app, API calls go to Kong.
+for `ctc-scoring.runvaders.com` and splits traffic by path: pages go to the app, API calls go to Kong.
 
 The browser talks to Supabase **directly** for data, writes, and live updates. The Next.js server
 only renders pages, checks who's signed in, and completes magic-link sign-in. All authorization lives
@@ -28,7 +28,7 @@ in Postgres (row-level security plus two `SECURITY INVOKER` functions), so there
                                  │  HTTPS 443  (80 → 301)
 ┌─ DigitalOcean Droplet (shared with 3 other apps) ──────────────────────────┐
 │                                ▼                                           │
-│  host nginx: TLS for ctc.runvaders.com (certbot); also serves the others   │
+│  host nginx: TLS for ctc-scoring.runvaders.com (certbot); also serves the others   │
 │       │ /                            │ /{auth,rest,realtime}/v1            │
 │       ▼ 127.0.0.1:8084               ▼ 127.0.0.1:8085                      │
 │ ┌─ compose project: ctc-scoring ─────────────────────────────────────────┐ │
@@ -96,7 +96,7 @@ RLS lets `anon` read everything, which is intentional: standings and schedule ar
 
 ```
 browser ──POST /auth/v1/otp {email}──▶ kong ──▶ auth ──SMTP──▶ inbox
-inbox link ──▶ /auth/v1/verify ──▶ auth ──302──▶ https://ctc.runvaders.com/auth/callback?code=…
+inbox link ──▶ /auth/v1/verify ──▶ auth ──302──▶ https://ctc-scoring.runvaders.com/auth/callback?code=…
 app /auth/callback ──exchangeCodeForSession──▶ kong ──▶ auth
 app ──302 + Set-Cookie (session)──▶ browser ──▶ /score/<id>
 ```
@@ -113,8 +113,8 @@ app ──302 + Set-Cookie (session)──▶ browser ──▶ /score/<id>
 
 ```
 browser ──GET /score/<id>──▶ nginx ──▶ app
-    proxy.ts: refresh session cookie (auth.getClaims)          ──▶ https://ctc.runvaders.com/auth/v1 …
-    page:     requireStaff() → getClaims + rpc('is_staff')      ──▶ https://ctc.runvaders.com/rest/v1 …
+    proxy.ts: refresh session cookie (auth.getClaims)          ──▶ https://ctc-scoring.runvaders.com/auth/v1 …
+    page:     requireStaff() → getClaims + rpc('is_staff')      ──▶ https://ctc-scoring.runvaders.com/rest/v1 …
   ◀── HTML, or redirect to /login, or "Staff only"
 ```
 
@@ -233,7 +233,7 @@ the first change is to refetch only `scores` on a change event instead of all fi
   enforced where the data lives.
 - **Migrate on container start.** It's the only way to run migrations under a deploy user whose sudo
   allows `up -d` but not `run` (food-shopper's reasoning, adopted as is).
-- **Same origin for app and API** (`ctc.runvaders.com` for both). This avoids CORS preflights and
+- **Same origin for app and API** (`ctc-scoring.runvaders.com` for both). This avoids CORS preflights and
   cookie-domain questions, and keeps a single TLS cert.
 
 ## Related

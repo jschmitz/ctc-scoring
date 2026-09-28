@@ -1,4 +1,4 @@
-# Install as ROOT's crontab (backup.sh uses `docker compose exec`, which the
+# Install as ROOT's crontab (backup.sh uses `docker exec` on the shared supabase-db container, which the
 # ctc-scoring user's scoped sudo doesn't allow). If root already has a crontab
 # (food-shopper's), append this line instead of replacing it:
 #   sudo crontab -l | cat - /opt/ctc-scoring/deploy/crontab.example | sudo crontab -

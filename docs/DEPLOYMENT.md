@@ -2,7 +2,7 @@
 
 GitHub Actions tests and builds, Docker Hub stores the image, and the shared DigitalOcean
 Droplet runs it next to the other apps.
-Live at **https://ctc.runvaders.com**.
+Live at **https://ctc-scoring.runvaders.com**.
 
 ```
 push to main
@@ -15,7 +15,7 @@ SSH to Droplet as `ctc-scoring` (scoped sudo) → /opt/ctc-scoring/deploy.sh <sh
    ↓
 app container's entrypoint applies migrations, then starts Next.js
    ↓
-host nginx: TLS for ctc.runvaders.com
+host nginx: TLS for ctc-scoring.runvaders.com
    /                         → app   127.0.0.1:8084
    /auth/v1 /rest/v1 /realtime/v1 → kong 127.0.0.1:8085  (self-hosted Supabase)
 ```
@@ -36,7 +36,7 @@ This follows the house pattern the other apps on the Droplet already use. It doe
 | Borrowed from | What |
 |---|---|
 | **food-shopper** | The whole shape: Next.js standalone image, a self-hosted Supabase stack in the app's own compose file, a scoped deploy user and `deploy.sh <sha>`, migrate-on-boot entrypoint, `gen-keys.sh`, nightly `backup.sh` as root, and a `verify` job that gates the `ship` job. Most `deploy/` files are copied from there and trimmed. |
-| **middle-school-track** | `runvaders.com` is its domain, so `ctc.runvaders.com` sits under it. Also its certbot flow: HTTP-only vhost, then the ACME webroot challenge, then the full HTTPS vhost. Its workflow runs that as root on every deploy. Here it's done **once by hand** instead, because this app's deploy user is scoped the way food-shopper's is. |
+| **middle-school-track** | `runvaders.com` is its domain, so `ctc-scoring.runvaders.com` sits under it. Also its certbot flow: HTTP-only vhost, then the ACME webroot challenge, then the full HTTPS vhost. Its workflow runs that as root on every deploy. Here it's done **once by hand** instead, because this app's deploy user is scoped the way food-shopper's is. |
 | **jakeschmitz-v4** | The simple, readable doc format. Every push to `main` goes straight to production, and there's no staging environment. That's fine for a once-a-year event app, as long as `main` stays deployable. |
 
 What's deliberately different from food-shopper: no `storage`, `imgproxy`, or `meta` containers (this app has no uploads and no dashboard), no `-tools` image or export job (the score table already exports CSV), and no e2e job yet.
@@ -109,7 +109,7 @@ Plus a `migrate` service under `profiles: ["tools"]` for manual runs.
 `Dockerfile`: food-shopper's three stages, switched from pnpm to npm (`npm ci`):
 
 - `deps`: `npm ci`
-- `build`: build args `NEXT_PUBLIC_SUPABASE_URL=https://ctc.runvaders.com` and
+- `build`: build args `NEXT_PUBLIC_SUPABASE_URL=https://ctc-scoring.runvaders.com` and
   `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<ANON_KEY>`, then `npm run build`. `NEXT_PUBLIC_` values are
   baked into the browser bundle, so they must be present at build time.
 - `run`: `node:22-alpine` plus `bash` and `postgresql17-client`, copying the standalone output,
@@ -146,7 +146,7 @@ as user `ctc-scoring` runs `/opt/ctc-scoring/deploy.sh ${{ github.sha }}`.
 | `DOCKERHUB_TOKEN` | Docker Hub token scoped read/write to `ctc-scoring` only |
 | `DROPLET_HOST` | the Droplet IP |
 | `DROPLET_SSH_KEY` | private half of a **new** ed25519 key authorized only for `ctc-scoring` |
-| `NEXT_PUBLIC_SUPABASE_URL` | `https://ctc.runvaders.com` |
+| `NEXT_PUBLIC_SUPABASE_URL` | `https://ctc-scoring.runvaders.com` |
 | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | the `ANON_KEY` from `gen-keys.sh` |
 
 ---
@@ -186,13 +186,13 @@ Never edit an applied migration; add a new one.
 ## nginx and TLS
 
 Two vhost files, installed by hand as root (the deploy user can't touch nginx):
-`deploy/nginx-ctc.runvaders.com.http-only.conf` (to get the certificate) and then
-`deploy/nginx-ctc.runvaders.com.conf`. Both pass `nginx -t`. The sequence is middle-school-track's certbot flow, scoped to the one hostname:
+`deploy/nginx-ctc-scoring.runvaders.com.http-only.conf` (to get the certificate) and then
+`deploy/nginx-ctc-scoring.runvaders.com.conf`. Both pass `nginx -t`. The sequence is middle-school-track's certbot flow, scoped to the one hostname:
 
 1. DNS: an **A record `ctc` → Droplet IP** in the `runvaders.com` zone.
-2. Install an HTTP-only vhost for `ctc.runvaders.com` that serves `/.well-known/acme-challenge/` from
+2. Install an HTTP-only vhost for `ctc-scoring.runvaders.com` that serves `/.well-known/acme-challenge/` from
    `/var/www/certbot`. `nginx -t && systemctl reload nginx`.
-3. `certbot certonly --webroot -w /var/www/certbot -d ctc.runvaders.com`. This is a separate cert, so
+3. `certbot certonly --webroot -w /var/www/certbot -d ctc-scoring.runvaders.com`. This is a separate cert, so
    runvaders.com's cert isn't touched.
 4. Replace the vhost with the full HTTPS config:
    - `listen 80` → 301 to https
@@ -213,8 +213,8 @@ Two vhost files, installed by hand as root (the deploy user can't touch nginx):
 - `HOST_APP_PORT=8084`, `HOST_KONG_PORT=8085`
 - `POSTGRES_HOST=db`, `POSTGRES_PORT=5432`, `POSTGRES_DB=postgres`, `POSTGRES_PASSWORD` (`openssl rand -hex 32`)
 - `JWT_SECRET`, `JWT_EXPIRY=3600`, `ANON_KEY`, `SERVICE_ROLE_KEY`, `REALTIME_SECRET_KEY_BASE` (from `deploy/gen-keys.sh`)
-- `SITE_URL=https://ctc.runvaders.com`, `API_EXTERNAL_URL=https://ctc.runvaders.com`,
-  `ADDITIONAL_REDIRECT_URLS=https://ctc.runvaders.com/**`
+- `SITE_URL=https://ctc-scoring.runvaders.com`, `API_EXTERNAL_URL=https://ctc-scoring.runvaders.com`,
+  `ADDITIONAL_REDIRECT_URLS=https://ctc-scoring.runvaders.com/**`
 - `ENABLE_EMAIL_SIGNUP=true`, `ENABLE_EMAIL_AUTOCONFIRM=false`, `DISABLE_SIGNUP=false`, phone and anonymous off.
   Anyone can request a sign-in link, but only emails in the `staff` table can write (enforced by RLS).
   Turning signup off would mean inviting each volunteer through GoTrue instead.
@@ -230,7 +230,7 @@ Two vhost files, installed by hand as root (the deploy user can't touch nginx):
 Run these on the Droplet as root unless noted. `$REPO` is a local checkout of this repo.
 
 1. **Headroom check.** Run `free -h` and `docker stats --no-stream`, and resize the Droplet if needed (see "The Droplet").
-2. **DNS.** Add the A record `ctc.runvaders.com` → Droplet IP, and wait until `host ctc.runvaders.com` resolves.
+2. **DNS.** Add the A record `ctc-scoring.runvaders.com` → Droplet IP, and wait until `host ctc-scoring.runvaders.com` resolves.
 3. **Deploy user and sudo.**
    ```bash
    adduser --disabled-password --gecos "" ctc-scoring
@@ -254,7 +254,7 @@ Run these on the Droplet as root unless noted. `$REPO` is a local checkout of th
    In the repo: `gh secret set NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` and so on.
 7. **nginx and cert.** Follow steps 2–4 under "nginx and TLS".
 8. **First deploy.** Push to `main` and watch the workflow. The `ship` job ends by polling
-   `https://ctc.runvaders.com/api/health`. On the Droplet,
+   `https://ctc-scoring.runvaders.com/api/health`. On the Droplet,
    `sudo docker compose -f /opt/ctc-scoring/docker-compose.yml ps` should show only
    `127.0.0.1:8084` and `127.0.0.1:8085` published, and `logs app` should show both migrations applying.
 9. **Bootstrap data** (once):
