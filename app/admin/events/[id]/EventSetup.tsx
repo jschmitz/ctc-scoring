@@ -183,8 +183,10 @@ function TeamsEditor({ data, supabase, reload }: SectionProps) {
       <h2 className="text-lg font-semibold">Teams ({data.teams.length})</h2>
       {/* No overflow clipping here: the color picker popover extends below the table. */}
       <div className="mt-4">
-        <table className="w-full text-sm">
-          <thead className="text-left text-slate-500">
+        {/* Below sm each team is a two-row grid (number, name, delete / color, captain); five
+            table columns don't fit a phone. */}
+        <table className="w-full text-sm max-sm:block">
+          <thead className="text-left text-slate-500 max-sm:hidden">
             <tr>
               <th className="w-20 pb-2 font-medium">#</th>
               <th className="pb-2 font-medium">Name</th>
@@ -193,10 +195,13 @@ function TeamsEditor({ data, supabase, reload }: SectionProps) {
               <th />
             </tr>
           </thead>
-          <tbody>
+          <tbody className="max-sm:block">
             {data.teams.map((t) => (
-              <tr key={t.id}>
-                <td className="py-1 pr-2">
+              <tr
+                key={t.id}
+                className="max-sm:grid max-sm:grid-cols-[6.5rem_1fr_auto] max-sm:items-center max-sm:gap-x-2 max-sm:gap-y-1.5 max-sm:border-b max-sm:border-slate-100 max-sm:py-2"
+              >
+                <td className="py-1 pr-2 max-sm:p-0">
                   <input
                     type="number"
                     className={`${input} w-16`}
@@ -204,20 +209,20 @@ function TeamsEditor({ data, supabase, reload }: SectionProps) {
                     onBlur={(e) => e.target.valueAsNumber !== t.number && update(t.id, { number: e.target.valueAsNumber })}
                   />
                 </td>
-                <td className="py-1 pr-2">
-                  <input className={`${input} w-full`} defaultValue={t.name} onBlur={(e) => e.target.value !== t.name && update(t.id, { name: e.target.value })} />
+                <td className="py-1 pr-2 max-sm:p-0">
+                  <input className={`${input} w-full`} placeholder="Team name" defaultValue={t.name} onBlur={(e) => e.target.value !== t.name && update(t.id, { name: e.target.value })} />
                 </td>
-                <td className="py-1 pr-2">
+                <td className="py-1 pr-2 max-sm:col-start-1 max-sm:row-start-2 max-sm:p-0">
                   <TeamColorPicker
                     value={t.color}
                     takenBy={Object.fromEntries(data.teams.filter((o) => o.id !== t.id).map((o) => [o.color.toLowerCase(), o.name]))}
                     onChange={(color) => update(t.id, { color })}
                   />
                 </td>
-                <td className="py-1 pr-2">
-                  <input className={`${input} w-full`} defaultValue={t.captain} onBlur={(e) => e.target.value !== t.captain && update(t.id, { captain: e.target.value })} />
+                <td className="py-1 pr-2 max-sm:col-span-2 max-sm:col-start-2 max-sm:row-start-2 max-sm:p-0">
+                  <input className={`${input} w-full`} placeholder="Captain (optional)" defaultValue={t.captain} onBlur={(e) => e.target.value !== t.captain && update(t.id, { captain: e.target.value })} />
                 </td>
-                <td className="py-1 text-right">
+                <td className="py-1 text-right max-sm:col-start-3 max-sm:row-start-1 max-sm:p-0">
                   <button onClick={() => remove(t.id, t.name)} className="text-sm text-red-700 hover:underline">
                     Delete
                   </button>
@@ -265,11 +270,11 @@ function ChallengesEditor({ data, supabase, reload }: SectionProps) {
       )}
       <div className="mt-4 grid gap-4 md:grid-cols-2">
         {data.challenges.map((c) => (
-          <fieldset key={c.id} disabled={locked} className="rounded-lg border border-slate-200 p-4">
+          <fieldset key={c.id} disabled={locked} className="min-w-0 rounded-lg border border-slate-200 p-4">
             <div className="flex items-center gap-2">
               <span className="font-mono text-slate-400">{c.position}.</span>
               <input
-                className={`${input} flex-1 font-medium`}
+                className={`${input} min-w-0 flex-1 font-medium`}
                 defaultValue={c.name}
                 onBlur={(e) => e.target.value !== c.name && run(reload, supabase.from("challenges").update({ name: e.target.value }).eq("id", c.id))}
               />
@@ -294,7 +299,7 @@ function ChallengesEditor({ data, supabase, reload }: SectionProps) {
               {c.scoring_components.map((sc) => (
                 <div key={sc.id} className="flex items-center gap-2 text-sm">
                   <input
-                    className={`${input} flex-1`}
+                    className={`${input} min-w-0 flex-1`}
                     defaultValue={sc.label}
                     onBlur={(e) => e.target.value !== sc.label && run(reload, supabase.from("scoring_components").update({ label: e.target.value }).eq("id", sc.id))}
                   />

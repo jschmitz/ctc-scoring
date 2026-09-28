@@ -1,16 +1,29 @@
 @import "tailwindcss";
 
+/* Colors follow runvaders.com (middle-school-track site/styles.css):
+   maroon primary, gold accent, light gray page. */
 @theme inline {
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-  --color-accent: #ea580c;
-  --color-accent-strong: #c2410c;
-  --color-accent-soft: #fff7ed;
+  --color-accent: #6b1f2a;
+  --color-accent-strong: #4d1520;
+  --color-accent-soft: #f7edef;
+  --color-gold: #c4973a;
+  --color-gold-light: #d4a94a;
 }
 
 body {
-  background: #f8fafc;
-  color: #0f172a;
+  background: #f4f4f4;
+  color: #222222;
+}
+
+/* Keyboard focus in brand colors instead of the OS accent (which varies by device). */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+header :focus-visible {
+  outline-color: var(--color-gold-light);
 }
 
 @media print {

@@ -47,7 +47,7 @@ export function ScoreTable({ eventId, staffEmail }: { eventId: string; staffEmai
                 <button
                   key={v}
                   onClick={() => setView(v)}
-                  className={`rounded-md px-3 py-1.5 ${view === v ? "bg-slate-900 text-white" : "text-slate-600"}`}
+                  className={`rounded-md px-3 py-1.5 ${view === v ? "bg-accent text-white" : "text-slate-600"}`}
                 >
                   {v === "round" ? "By round" : "All scores"}
                 </button>
