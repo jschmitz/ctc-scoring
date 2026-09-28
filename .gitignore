@@ -32,6 +32,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -39,3 +40,30 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# supabase local state (also covered by supabase/.gitignore)
+supabase/.branches
+supabase/.temp
+
+# test output
+/test-results/
+/playwright-report/
+
+# logs
+*.log
+
+# database dumps (from deploy backups or manual pg_dump)
+*.sql.gz
+*.dump
+
+# editors and OS
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+
+# Word/Office lock files (e.g. while the rules .docx is open)
+~$*
+
+# personal Claude Code settings (shared ones like .claude/launch.json stay tracked)
+.claude/settings.local.json
