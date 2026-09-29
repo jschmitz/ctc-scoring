@@ -6,7 +6,7 @@ import { OpenLoginForm } from "./OpenLoginForm";
 // now) is the temporary open login in ./actions.ts: any email, no email sent.
 export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   const { next, error } = await searchParams;
-  const nextPath = typeof next === "string" ? next : "/";
+  const nextPath = typeof next === "string" ? next : "/admin";
   const magicLink = process.env.LOGIN_MODE === "magic-link";
   return (
     <>

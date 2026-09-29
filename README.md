@@ -7,7 +7,7 @@ The leaderboard ranks teams by the sum of their raw points.
 - **Score table** (`/score/[eventId]`, staff): enter each team's result as counts per scoring item. The app computes the total, for example Archery center ×5, black ×2, board ×1. Scores are grouped by round and advance to the next pending team after each save.
 - **Leaderboard** (`/event/[id]/leaderboard`, public): updates live and has a projector mode.
 - **Schedule** (`/event/[id]/schedule`, public): the rotation by station and by team, printable.
-- **Setup** (`/admin/events/[id]`, staff): event details, teams (with a paste-in bulk add), challenges and scoring items, rotation, and the staff list. `/admin` creates a new event, optionally copying another event's challenges.
+- **Setup** (`/admin/events/[id]`, staff): event details, teams (with a paste-in bulk add), challenges and scoring items, rotation, and the staff list. `/admin` lists every event (where staff land after signing in); `/admin/new` creates one, optionally copying another event's challenges.
 
 ## Stack
 Next.js 16 (App Router) + Tailwind, Supabase (Postgres, Auth magic links, Realtime).

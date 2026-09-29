@@ -20,8 +20,8 @@ export type OpenLoginState = { error: string } | null;
  */
 export async function openLogin(_prev: OpenLoginState, formData: FormData): Promise<OpenLoginState> {
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
-  const next = String(formData.get("next") ?? "/");
-  const safeNext = next.startsWith("/") && !next.startsWith("//") ? next : "/";
+  const next = String(formData.get("next") ?? "/admin");
+  const safeNext = next.startsWith("/") && !next.startsWith("//") ? next : "/admin";
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: "Enter a valid email address." };
 
   console.log(`[login] open login: ${email}`);
