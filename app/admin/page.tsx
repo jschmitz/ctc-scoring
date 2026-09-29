@@ -12,7 +12,13 @@ export default async function AdminPage() {
   const email = await requireStaff("/admin");
   if (!email) return <NotStaff />;
   const supabase = await createClient();
-  const { data: events } = await supabase.from("events").select("*").order("event_date", { ascending: false });
+  // Real events first, then simulations, each newest first.
+  const { data: events } = await supabase
+    .from("events")
+    .select("*")
+    .order("is_simulation")
+    .order("event_date", { ascending: false })
+    .order("created_at", { ascending: false });
 
   return (
     <>
@@ -24,8 +30,11 @@ export default async function AdminPage() {
             Create new event
           </Link>
         </div>
-        <p className="mt-2 text-sm text-slate-600">Signed in as {email}.</p>
-        <EventList events={(events as Event[] | null) ?? []} />
+        <p className="mt-2 text-sm text-slate-600">
+          Signed in as {email}. <span className="font-medium">Simulate</span> copies an event and fills it with random scores so you
+          can preview the final standings; the real event isn&apos;t changed.
+        </p>
+        <EventList events={(events as Event[] | null) ?? []} staff />
       </main>
     </>
   );

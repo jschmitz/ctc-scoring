@@ -6,7 +6,12 @@ import type { Event } from "@/lib/types";
 
 export default async function Home() {
   const supabase = await createClient();
-  const { data: events } = await supabase.from("events").select("*").order("event_date", { ascending: false });
+  // Simulations are a staff tool (see /admin); keep them off the public list.
+  const { data: events } = await supabase
+    .from("events")
+    .select("*")
+    .eq("is_simulation", false)
+    .order("event_date", { ascending: false });
 
   return (
     <>

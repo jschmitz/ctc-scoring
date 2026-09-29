@@ -17,7 +17,7 @@ export function Schedule({ eventId }: { eventId: string }) {
 
   return (
     <>
-      <EventNav eventId={eventId} eventName={data.event.name} active="schedule" />
+      <EventNav eventId={eventId} eventName={data.event.name} active="schedule" simulation={data.event.is_simulation} />
       <main className="mx-auto w-full max-w-6xl px-4 py-6">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-semibold">Rotation schedule</h1>

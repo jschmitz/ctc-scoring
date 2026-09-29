@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { EventNav } from "@/components/EventNav";
 import { card, input, primaryButton, secondaryButton } from "@/components/ui";
 import { TeamColorPicker } from "@/components/TeamColorPicker";
 import { generateRotation, roundCount } from "@/lib/rotation";
+import { deleteSimulation, finishSimulation, playNextRound, restartSimulation } from "@/lib/simulation";
 import { nextColors, TEAM_COLORS } from "@/lib/teamColors";
 import type { EventStatus } from "@/lib/types";
 import { useEventData, type EventData } from "@/lib/useEventData";
@@ -27,15 +30,77 @@ export function EventSetup({ eventId }: { eventId: string }) {
 
   return (
     <>
-      <EventNav eventId={eventId} eventName={data.event.name} active="admin" />
+      <EventNav eventId={eventId} eventName={data.event.name} active="admin" simulation={data.event.is_simulation} />
       <main className="mx-auto w-full max-w-5xl space-y-6 px-4 py-6">
-        <EventSettings {...props} />
+        {data.event.is_simulation && <SimulationPanel {...props} />}
+        {/* Remount when the status changes elsewhere (the simulation panel, another staff member), so the form never re-saves a stale status. */}
+        <EventSettings key={data.event.status} {...props} />
         <RotationPanel {...props} />
         <TeamsEditor {...props} />
         <ChallengesEditor {...props} />
         <StaffEditor {...props} />
       </main>
     </>
+  );
+}
+
+/** Controls for a simulated event (lib/simulation.ts). Real events never show this. */
+function SimulationPanel({ data, supabase, reload }: SectionProps) {
+  const router = useRouter();
+  const [busy, setBusy] = useState<string | null>(null);
+  const rounds = roundCount(data.slots);
+  const final = data.event.status === "final";
+  const leaderboard = `/event/${data.event.id}/leaderboard`;
+
+  async function act(label: string, op: () => Promise<void>) {
+    setBusy(label);
+    try {
+      await op();
+      await reload();
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : String(err));
+    }
+    setBusy(null);
+  }
+
+  async function remove() {
+    if (!window.confirm(`Delete "${data.event.name}" and all its simulated scores?`)) return;
+    setBusy("delete");
+    try {
+      await deleteSimulation(supabase, data.event.id);
+      router.push("/admin");
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : String(err));
+      setBusy(null);
+    }
+  }
+
+  return (
+    <section className={`${card} border-gold bg-gold/10`}>
+      <h2 className="text-lg font-semibold">Simulation</h2>
+      <p className="mt-1 text-sm text-slate-600">
+        A copy of a real event, filled with random scores. {final ? `All ${rounds} rounds are scored.` : `Round ${data.event.current_round} of ${rounds} is next.`}{" "}
+        Open the{" "}
+        <Link href={leaderboard} className="text-accent-strong underline">
+          leaderboard
+        </Link>{" "}
+        in another window (or on the projector) to watch it update as rounds play.
+      </p>
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button className={primaryButton} disabled={!!busy || final} onClick={() => act("round", () => playNextRound(supabase, data.event.id))}>
+          {busy === "round" ? "Playing…" : final ? "All rounds played" : `Play round ${data.event.current_round}`}
+        </button>
+        <button className={secondaryButton} disabled={!!busy || final} onClick={() => act("finish", () => finishSimulation(supabase, data.event.id))}>
+          {busy === "finish" ? "Playing…" : "Play all remaining rounds"}
+        </button>
+        <button className={secondaryButton} disabled={!!busy || data.scores.length === 0} onClick={() => act("restart", () => restartSimulation(supabase, data.event.id))}>
+          {busy === "restart" ? "Clearing…" : "Restart (clear scores)"}
+        </button>
+        <button className={`${secondaryButton} text-red-700`} disabled={!!busy} onClick={remove}>
+          {busy === "delete" ? "Deleting…" : "Delete simulation"}
+        </button>
+      </div>
+    </section>
   );
 }
 

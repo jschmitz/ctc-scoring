@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { EventNav } from "@/components/EventNav";
+import { EventNav, SimulationBadge } from "@/components/EventNav";
 import { TeamName } from "@/components/TeamName";
 import { buildLeaderboard } from "@/lib/leaderboard";
 import { useEventData } from "@/lib/useEventData";
@@ -25,10 +25,11 @@ export function Leaderboard({ eventId }: { eventId: string }) {
 
   return (
     <>
-      {!projector && <EventNav eventId={eventId} eventName={data.event.name} active="leaderboard" />}
+      {!projector && <EventNav eventId={eventId} eventName={data.event.name} active="leaderboard" simulation={data.event.is_simulation} />}
       <main className={`mx-auto w-full px-4 py-6 ${big ? "max-w-none px-10" : "max-w-6xl"}`}>
         <div className="flex flex-wrap items-center gap-3">
           <h1 className={`font-semibold ${big ? "text-5xl" : "text-2xl"}`}>{big ? data.event.name : "Leaderboard"}</h1>
+          {projector && data.event.is_simulation && <SimulationBadge className="text-lg" />}
           <span className={`rounded-full bg-accent-soft px-3 py-1 font-medium text-accent-strong ${big ? "text-xl" : "text-sm"}`}>
             {data.event.status === "final" ? "Final" : `Round ${data.event.current_round}`}
           </span>

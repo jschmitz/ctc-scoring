@@ -8,6 +8,7 @@ The leaderboard ranks teams by the sum of their raw points.
 - **Leaderboard** (`/event/[id]/leaderboard`, public): updates live and has a projector mode.
 - **Schedule** (`/event/[id]/schedule`, public): the rotation by station and by team, printable.
 - **Setup** (`/admin/events/[id]`, staff): event details, teams (with a paste-in bulk add), challenges and scoring items, rotation, and the staff list. `/admin` lists every event (where staff land after signing in); `/admin/new` creates one, optionally copying another event's challenges.
+- **Simulate** (`/admin`, staff): copies an event into a labeled simulation (same challenges, scoring, teams and rotation; sample teams if it has none) and fills it with random but realistic scores, to preview the final standings. Play it all at once or round by round from the simulation's Setup page and watch the leaderboard update live. The real event is never changed, and simulations are hidden from the public home page.
 
 ## Stack
 Next.js 16 (App Router) + Tailwind, Supabase (Postgres, Auth magic links, Realtime).

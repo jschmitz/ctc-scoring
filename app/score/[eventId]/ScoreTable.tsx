@@ -38,7 +38,7 @@ export function ScoreTable({ eventId, staffEmail }: { eventId: string; staffEmai
 
   return (
     <>
-      <EventNav eventId={eventId} eventName={data.event.name} active="score" />
+      <EventNav eventId={eventId} eventName={data.event.name} active="score" simulation={data.event.is_simulation} />
       <main className="mx-auto grid w-full max-w-6xl gap-6 px-4 py-6 lg:grid-cols-[1fr_420px]">
         <section>
           <div className="flex flex-wrap items-center gap-3">

@@ -20,6 +20,7 @@ export function NewEventForm() {
     supabase
       .from("events")
       .select("*")
+      .eq("is_simulation", false)
       .order("event_date", { ascending: false })
       .then(({ data }) => {
         setEvents((data as Event[]) ?? []);

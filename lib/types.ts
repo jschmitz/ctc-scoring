@@ -9,6 +9,7 @@ export type Event = {
   status: EventStatus;
   teams_per_station: number;
   current_round: number;
+  is_simulation: boolean;
 };
 
 export type Challenge = {
