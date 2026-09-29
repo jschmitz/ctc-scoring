@@ -35,6 +35,7 @@ export function EventSetup({ eventId }: { eventId: string }) {
         {data.event.is_simulation && <SimulationPanel {...props} />}
         {/* Remount when the status changes elsewhere (the simulation panel, another staff member), so the form never re-saves a stale status. */}
         <EventSettings key={data.event.status} {...props} />
+        <ScoringSettings {...props} />
         <RotationPanel {...props} />
         <TeamsEditor {...props} />
         <ChallengesEditor {...props} />
@@ -100,6 +101,44 @@ function SimulationPanel({ data, supabase, reload }: SectionProps) {
           {busy === "delete" ? "Deleting…" : "Delete simulation"}
         </button>
       </div>
+    </section>
+  );
+}
+
+/** The enhanced-scoring switch. Saves on click; only the leaderboard's arithmetic changes, never stored scores. */
+function ScoringSettings({ data, supabase, reload }: SectionProps) {
+  const [saving, setSaving] = useState(false);
+  const enhanced = data.event.scoring_mode === "enhanced";
+
+  async function toggle(on: boolean) {
+    setSaving(true);
+    await run(reload, supabase.from("events").update({ scoring_mode: on ? "enhanced" : "standard" }).eq("id", data.event.id));
+    setSaving(false);
+  }
+
+  return (
+    <section className={card}>
+      <h2 className="text-lg font-semibold">Scoring</h2>
+      <label className="mt-3 flex items-start gap-3">
+        <input
+          type="checkbox"
+          className="mt-1 h-4 w-4 accent-accent"
+          checked={enhanced}
+          disabled={saving}
+          onChange={(e) => toggle(e.target.checked)}
+        />
+        <span>
+          <span className="font-medium">Use enhanced scoring</span>
+          <span className="mt-0.5 block text-sm text-slate-600">
+            Ranks teams within each challenge and totals the rank points, so every challenge counts the same and margin of victory
+            doesn&apos;t matter. Off: teams are ranked by total raw points. You can switch at any time. Scores aren&apos;t changed, only
+            how the leaderboard adds them up.{" "}
+            <Link href="/scoring" className="text-accent-strong underline">
+              How enhanced scoring works
+            </Link>
+          </span>
+        </span>
+      </label>
     </section>
   );
 }

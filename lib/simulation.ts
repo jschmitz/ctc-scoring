@@ -43,6 +43,7 @@ export async function createSimulation(supabase: SupabaseClient, sourceId: strin
         name: `${source.name} (simulation)`,
         event_date: source.event_date,
         teams_per_station: source.teams_per_station,
+        scoring_mode: source.scoring_mode,
         is_simulation: true,
       })
       .select()

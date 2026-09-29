@@ -1,6 +1,7 @@
 import type { ScoringComponent } from "./scoring";
 
 export type EventStatus = "setup" | "live" | "final";
+export type ScoringMode = "standard" | "enhanced";
 
 export type Event = {
   id: string;
@@ -10,6 +11,7 @@ export type Event = {
   teams_per_station: number;
   current_round: number;
   is_simulation: boolean;
+  scoring_mode: ScoringMode;
 };
 
 export type Challenge = {

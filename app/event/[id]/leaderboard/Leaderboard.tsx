@@ -1,10 +1,20 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { EventNav, SimulationBadge } from "@/components/EventNav";
 import { TeamName } from "@/components/TeamName";
-import { buildLeaderboard } from "@/lib/leaderboard";
+import { buildEnhancedLeaderboard, type EnhancedNote, type EnhancedRow } from "@/lib/enhancedScoring";
+import { enhancedVerificationCsv } from "@/lib/enhancedVerification";
+import { buildLeaderboard, type LeaderboardRow } from "@/lib/leaderboard";
 import { useEventData } from "@/lib/useEventData";
+
+const NOTE_LABELS: Record<EnhancedNote["kind"], string> = {
+  "challenge-tie": "Tie in a challenge",
+  provisional: "Not everyone has played",
+  "order-change": "Different from raw totals",
+  "final-tie": "Shared place",
+};
 
 export function Leaderboard({ eventId }: { eventId: string }) {
   const { data, error } = useEventData(eventId);
@@ -13,7 +23,9 @@ export function Leaderboard({ eventId }: { eventId: string }) {
   if (error) return <p className="p-8 text-red-700">Couldn&apos;t load the event: {error}</p>;
   if (!data) return <p className="p-8 text-slate-500">Loading…</p>;
 
-  const rows = buildLeaderboard(data.teams, data.scores);
+  const enhanced = data.event.scoring_mode === "enhanced";
+  const board = enhanced ? buildEnhancedLeaderboard(data.teams, data.challenges, data.scores) : null;
+  const rows: (LeaderboardRow | EnhancedRow)[] = board ? board.rows : buildLeaderboard(data.teams, data.scores);
   const big = projector;
 
   function toggleProjector() {
@@ -21,6 +33,17 @@ export function Leaderboard({ eventId }: { eventId: string }) {
     setProjector(next);
     if (next) document.documentElement.requestFullscreen?.().catch(() => {});
     else if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  }
+
+  function downloadVerification() {
+    const csv = enhancedVerificationCsv(data!.event.name, data!.challenges, board!);
+    // The byte-order mark makes Excel read the file as UTF-8 (team names, the "−" in the notes).
+    const blob = new Blob(["﻿", csv], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${data!.event.name.replace(/\W+/g, "-").replace(/^-|-$/g, "").toLowerCase()}-enhanced-verification.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
   }
 
   return (
@@ -33,12 +56,31 @@ export function Leaderboard({ eventId }: { eventId: string }) {
           <span className={`rounded-full bg-accent-soft px-3 py-1 font-medium text-accent-strong ${big ? "text-xl" : "text-sm"}`}>
             {data.event.status === "final" ? "Final" : `Round ${data.event.current_round}`}
           </span>
+          {enhanced && (
+            <Link
+              href="/scoring"
+              className={`rounded-full border border-gold px-3 py-1 font-medium text-accent-strong hover:bg-gold/10 ${big ? "text-xl" : "text-sm"}`}
+            >
+              Enhanced scoring{!big && " · how it works"}
+            </Link>
+          )}
           <span className="flex items-center gap-1.5 text-sm text-slate-500">
             <span className="h-2 w-2 animate-pulse rounded-full bg-green-500" /> Live
           </span>
-          <button onClick={toggleProjector} className="no-print ml-auto rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50">
-            {projector ? "Exit projector mode" : "Projector mode"}
-          </button>
+          <div className="no-print ml-auto flex flex-wrap gap-2">
+            {enhanced && !projector && (
+              <button
+                onClick={downloadVerification}
+                title="A spreadsheet that recomputes these standings from the raw scores with its own formulas and checks them against the app"
+                className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50"
+              >
+                Download verification sheet
+              </button>
+            )}
+            <button onClick={toggleProjector} className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50">
+              {projector ? "Exit projector mode" : "Projector mode"}
+            </button>
+          </div>
         </div>
 
         <div className="mt-6 overflow-x-auto rounded-xl border border-slate-200 bg-white">
@@ -52,33 +94,76 @@ export function Leaderboard({ eventId }: { eventId: string }) {
                     {c.name}
                   </th>
                 ))}
-                <th className="px-4 py-3 text-right">Total</th>
+                <th className="px-4 py-3 text-right">{enhanced ? "Points" : "Total"}</th>
               </tr>
+              {enhanced && (
+                <tr>
+                  <th />
+                  <th />
+                  <th colSpan={data.challenges.length + 1} className="px-3 pb-2 text-center text-xs font-normal text-slate-500">
+                    Rank points, with the raw score in grey
+                  </th>
+                </tr>
+              )}
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {rows.map((r) => (
-                <tr key={r.team.id} className={r.rank === 1 && r.total > 0 ? "bg-accent-soft" : ""}>
-                  <td className="px-4 py-3 text-center font-semibold tabular-nums">
-                    {r.tied ? `T${r.rank}` : r.rank}
-                  </td>
-                  <td className="px-4 py-3">
-                    <TeamName team={r.team} className="font-medium" />
-                    <span className="ml-2 text-xs text-slate-400">
-                      {r.completed}/{data.challenges.length} done
-                    </span>
-                  </td>
-                  {data.challenges.map((c) => (
-                    <td key={c.id} className="px-3 py-3 text-center tabular-nums text-slate-700">
-                      {r.byChallenge[c.id] ?? <span className="text-slate-300">—</span>}
+              {rows.map((r) => {
+                const e = board ? (r as EnhancedRow) : null;
+                return (
+                  <tr key={r.team.id} className={r.rank === 1 && r.total > 0 ? "bg-accent-soft" : ""}>
+                    <td className="px-4 py-3 text-center font-semibold tabular-nums">{r.tied ? `T${r.rank}` : r.rank}</td>
+                    <td className="px-4 py-3">
+                      <TeamName team={r.team} className="font-medium" />
+                      <span className="ml-2 text-xs text-slate-400">
+                        {r.completed}/{data.challenges.length} done
+                      </span>
                     </td>
-                  ))}
-                  <td className={`px-4 py-3 text-right font-bold tabular-nums ${big ? "text-4xl" : "text-lg"}`}>{r.total}</td>
-                </tr>
-              ))}
+                    {data.challenges.map((c) => {
+                      const value = r.byChallenge[c.id];
+                      if (value === undefined)
+                        return (
+                          <td key={c.id} className="px-3 py-3 text-center">
+                            <span className="text-slate-300">—</span>
+                          </td>
+                        );
+                      if (!e) return <td key={c.id} className="px-3 py-3 text-center tabular-nums text-slate-700">{value}</td>;
+                      const placing = board!.placings[c.id]?.find((p) => p.teamId === r.team.id);
+                      return (
+                        <td
+                          key={c.id}
+                          className="px-3 py-3 text-center tabular-nums text-slate-700"
+                          title={placing ? `Raw score ${placing.raw} · ${placing.tied ? "tied " : ""}rank ${placing.rank} · ${placing.points} points` : undefined}
+                        >
+                          <span className="font-semibold">{value}</span>
+                          <span className={`ml-1 text-slate-400 ${big ? "text-base" : "text-xs"}`}>({e.rawByChallenge[c.id]})</span>
+                        </td>
+                      );
+                    })}
+                    <td className={`px-4 py-3 text-right font-bold tabular-nums ${big ? "text-4xl" : "text-lg"}`}>
+                      {r.total}
+                      {e && <span className={`block font-normal text-slate-400 ${big ? "text-base" : "text-xs"}`}>raw {e.rawTotal}</span>}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
         {rows.length === 0 && <p className="mt-4 text-slate-500">No teams yet.</p>}
+
+        {board && board.notes.length > 0 && (
+          <section className={`mt-6 rounded-xl border border-gold/60 bg-white p-5 ${big ? "text-xl" : "text-sm"}`}>
+            <h2 className={`font-semibold ${big ? "text-2xl" : "text-base"}`}>How enhanced scoring shaped these standings</h2>
+            <ul className="mt-3 space-y-2">
+              {board.notes.map((n, i) => (
+                <li key={i} className="flex flex-wrap gap-x-2">
+                  <span className="font-medium text-accent-strong">{NOTE_LABELS[n.kind]}:</span>
+                  <span className="text-slate-700">{n.text}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
       </main>
     </>
   );
