@@ -5,7 +5,7 @@ import Link from "next/link";
 import { EventNav, SimulationBadge } from "@/components/EventNav";
 import { TeamName } from "@/components/TeamName";
 import { buildEnhancedLeaderboard, type EnhancedNote, type EnhancedRow } from "@/lib/enhancedScoring";
-import { enhancedVerificationCsv } from "@/lib/enhancedVerification";
+import { scoringSheetXlsx } from "@/lib/scoringSheetWorkbook";
 import { buildLeaderboard, type LeaderboardRow } from "@/lib/leaderboard";
 import { useEventData } from "@/lib/useEventData";
 
@@ -13,6 +13,7 @@ const NOTE_LABELS: Record<EnhancedNote["kind"], string> = {
   "challenge-tie": "Tie in a challenge",
   provisional: "Not everyone has played",
   "order-change": "Different from raw totals",
+  tiebreak: "Tiebreaker",
   "final-tie": "Shared place",
 };
 
@@ -35,13 +36,12 @@ export function Leaderboard({ eventId }: { eventId: string }) {
     else if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
   }
 
-  function downloadVerification() {
-    const csv = enhancedVerificationCsv(data!.event.name, data!.challenges, board!);
-    // The byte-order mark makes Excel read the file as UTF-8 (team names, the "−" in the notes).
-    const blob = new Blob(["﻿", csv], { type: "text/csv" });
+  async function downloadScoringSheet() {
+    const bytes = await scoringSheetXlsx({ eventName: data!.event.name, teams: data!.teams, challenges: data!.challenges, board: board! });
+    const blob = new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `${data!.event.name.replace(/\W+/g, "-").replace(/^-|-$/g, "").toLowerCase()}-enhanced-verification.csv`;
+    a.download = `${data!.event.name.replace(/\W+/g, "-").replace(/^-|-$/g, "").toLowerCase()}-scoring-sheet.xlsx`;
     a.click();
     URL.revokeObjectURL(a.href);
   }
@@ -70,11 +70,11 @@ export function Leaderboard({ eventId }: { eventId: string }) {
           <div className="no-print ml-auto flex flex-wrap gap-2">
             {enhanced && !projector && (
               <button
-                onClick={downloadVerification}
-                title="A spreadsheet that recomputes these standings from the raw scores with its own formulas and checks them against the app"
+                onClick={downloadScoringSheet}
+                title="The organizers' scoring sheet, filled with these raw scores: its own formulas compute the standings, and a Check column compares each team with the app"
                 className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50"
               >
-                Download verification sheet
+                Download scoring sheet (Excel)
               </button>
             )}
             <button onClick={toggleProjector} className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50">

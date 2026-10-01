@@ -1,42 +1,44 @@
 import { buildLeaderboard, type LeaderboardRow, type LeaderboardScore, type LeaderboardTeam } from "./leaderboard";
 
 /**
- * Enhanced scoring: every challenge counts the same, and margin of victory doesn't matter.
+ * Enhanced scoring, as defined by the organizers' "CTC Scoring Sheet 2026" workbook.
+ * Every challenge counts the same, and margin of victory doesn't matter.
  *
- * 1. Within each challenge, teams are ranked by raw score, highest first.
- * 2. Each team gets rank points: first place gets as many points as there are teams
- *    (confirmed by the organizers: 12 teams → 12 for first), down to 1 for last. Tied teams both get the higher number, and the next number
- *    is skipped (scores 20, 18, 18, 15 with 12 teams → 12, 11, 11, 9).
- * 3. A team's enhanced total is the sum of its rank points; the highest total wins.
+ * 1. Rank each challenge by raw score, highest first. The sheet uses
+ *    `RANK(score, all scores, 0)`: tied teams share the best rank and the next rank is
+ *    skipped ("if three teams tie for first place, they all get 12 points ... that team
+ *    will drop down to fourth place and receive 9 points").
+ * 2. Rank points: the sheet's Place→Points table gives 1st 12 points down to 12th 1 point
+ *    (12 teams). The app uses number of teams + 1 − rank, which is that table with 12
+ *    teams and scales with other team counts (organizers' decision).
+ * 3. Total = the sum of rank points over every challenge (`SUM` in Challenge Standings).
+ * 4. A tie on the total goes to the team with the most first-place finishes (sheet:
+ *    "Tie Breaker Num of Wins" = `COUNTIF(points, 12)`, so shared firsts count).
  *
- * Equivalently, points = number of teams − number of teams that scored higher. Tied
- * teams have the same number of teams above them, which is what gives them the same
- * points and skips the next number. The verification export (lib/enhancedVerification.ts)
- * recomputes it that way with COUNTIF, independently of this code. The rules page (/scoring) explains all of this with worked examples
- * that are also the unit tests (lib/enhancedScoring.examples.ts).
+ * Equivalently, points = number of teams − number of teams that scored higher.
+ *
+ * The rules page (/scoring) explains this with worked examples that are also unit tests
+ * (lib/enhancedScoring.examples.ts). lib/__tests__/scoringSheetOracle.test.ts checks
+ * this code against a literal transcription of the workbook's formulas, and
+ * lib/scoringSheetWorkbook.ts exports the workbook itself, filled with the app's raw
+ * scores, so organizers can check results with their own formulas.
  */
 
 /**
- * Decisions the known rules don't settle yet. Each is implemented as described and
- * shown on the rules page as pending confirmation. Change it here (and in the
- * matching example/test) once the spreadsheet settles it.
+ * Cases the organizers' workbook doesn't settle. Each is implemented as described and
+ * shown on the rules page as pending confirmation.
  */
 export const ENHANCED_ASSUMPTIONS = [
   {
     id: "in-progress",
     question: "How are challenges ranked before every team has played them?",
     assumption:
-      "Only teams that have a score are ranked, and a team that hasn't played gets 0 for that challenge. Points are provisional until every team has played, and are final once they have.",
+      "The scoring sheet only works once every score is in (a blank score shows #N/A). The app ranks just the teams that have played, and a team that hasn't played gets 0 for that challenge. Points are provisional until every team has played, then they're the same as the sheet's.",
   },
   {
-    id: "final-ties",
-    question: "What happens if teams tie on enhanced total?",
-    assumption: "They share the place. No tiebreaker is applied yet.",
-  },
-  {
-    id: "zero-scores",
-    question: "Does a score of 0 still earn rank points?",
-    assumption: "Yes. A 0 is ranked like any other score (typically last, so 1 point, or shared if several teams scored 0).",
+    id: "still-tied",
+    question: "What if teams are tied on points and on first-place finishes?",
+    assumption: "They share the place.",
   },
 ] as const;
 
@@ -44,8 +46,8 @@ export type ChallengePlacing = { teamId: string; raw: number; rank: number; poin
 
 /**
  * Rank points for one challenge. `rank` is 1 + the number of strictly higher scores
- * (standard competition ranking, same as Excel's RANK.EQ), and `points` is
- * teamCount + 1 − rank, i.e. teamCount − the number of strictly higher scores. Sorted best first, ties by team id for stability.
+ * (the workbook's RANK(…, 0)), and `points` is teamCount + 1 − rank. Sorted best first,
+ * ties by team id for stability.
  */
 export function rankChallenge(teamCount: number, scores: { team_id: string; total: number }[]): ChallengePlacing[] {
   return scores
@@ -66,12 +68,17 @@ export type EnhancedRow = LeaderboardRow & {
   /** byChallenge and total hold rank points; these hold the raw scores behind them. */
   rawByChallenge: Record<string, number | undefined>;
   rawTotal: number;
+  /** Challenges this team placed 1st in (shared firsts count): the tiebreaker. */
+  firstPlaces: number;
   /** Where the team would place under standard (raw total) scoring. */
   standardRank: number;
   standardTied: boolean;
 };
 
-export type EnhancedNote = { kind: "challenge-tie" | "provisional" | "order-change" | "final-tie"; text: string };
+export type EnhancedNote = {
+  kind: "challenge-tie" | "provisional" | "order-change" | "tiebreak" | "final-tie";
+  text: string;
+};
 
 export type EnhancedLeaderboard = {
   rows: EnhancedRow[];
@@ -89,11 +96,27 @@ function listNames(names: string[]): string {
 }
 
 const pts = (n: number) => `${n} point${n === 1 ? "" : "s"}`;
+const firsts = (n: number) => `${n} first-place finish${n === 1 ? "" : "es"}`;
+
+/**
+ * Orders teams by total, then first-place finishes, and assigns places. Teams share a
+ * place only when both are equal. Within a shared place they're listed by team number.
+ */
+function rankRows(rows: EnhancedRow[]): EnhancedRow[] {
+  const same = (a: EnhancedRow, b: EnhancedRow) => a.total === b.total && a.firstPlaces === b.firstPlaces;
+  const sorted = [...rows].sort((a, b) => b.total - a.total || b.firstPlaces - a.firstPlaces || a.team.number - b.team.number);
+  sorted.forEach((row, i) => {
+    row.rank = i > 0 && same(sorted[i - 1], row) ? sorted[i - 1].rank : i + 1;
+  });
+  for (const row of sorted) row.tied = sorted.some((o) => o !== row && same(o, row));
+  return sorted;
+}
 
 /**
  * The enhanced leaderboard, plus plain-language notes for every place the rules
  * changed something: ties within a challenge, provisional challenges, teams whose
- * place differs from the raw-total standings, and ties on the final total.
+ * place differs from the raw-total standings, ties on the total settled by the
+ * tiebreaker, and places still shared after it.
  */
 export function buildEnhancedLeaderboard(
   teams: LeaderboardTeam[],
@@ -134,13 +157,21 @@ export function buildEnhancedLeaderboard(
   }
 
   const standard = buildLeaderboard(teams, scores);
-  const rows: EnhancedRow[] = buildLeaderboard(teams, pointScores).map((row) => {
-    const std = standard.find((s) => s.team.id === row.team.id)!;
-    return { ...row, rawByChallenge: std.byChallenge, rawTotal: std.total, standardRank: std.rank, standardTied: std.tied };
-  });
+  const rows = rankRows(
+    buildLeaderboard(teams, pointScores).map((row) => {
+      const std = standard.find((s) => s.team.id === row.team.id)!;
+      return {
+        ...row,
+        rawByChallenge: std.byChallenge,
+        rawTotal: std.total,
+        firstPlaces: Object.values(placings).filter((placed) => placed.some((p) => p.teamId === row.team.id && p.rank === 1)).length,
+        standardRank: std.rank,
+        standardTied: std.tied,
+      };
+    }),
+  );
 
-  const played = rows.some((r) => r.completed > 0);
-  if (played) {
+  if (rows.some((r) => r.completed > 0)) {
     for (const r of rows) {
       if (r.rank !== r.standardRank) {
         notes.push({
@@ -149,12 +180,25 @@ export function buildEnhancedLeaderboard(
         });
       }
     }
-    for (const rank of [...new Set(rows.filter((r) => r.tied && r.total > 0).map((r) => r.rank))]) {
-      const group = rows.filter((r) => r.rank === rank);
-      notes.push({
-        kind: "final-tie",
-        text: `${listNames(group.map((r) => r.team.name))} are tied on ${pts(group[0].total)} and share ${ordinal(rank)} place. No tiebreaker has been set yet.`,
-      });
+    for (const total of [...new Set(rows.filter((r) => r.total > 0).map((r) => r.total))]) {
+      const group = rows.filter((r) => r.total === total);
+      if (group.length < 2) continue;
+      if (new Set(group.map((r) => r.firstPlaces)).size > 1) {
+        notes.push({
+          kind: "tiebreak",
+          text:
+            `${listNames(group.map((r) => r.team.name))} are tied on ${pts(total)}, so the tiebreaker (most first-place finishes) decides: ` +
+            group.map((r) => `${r.team.name} ${r.tied ? "tied " : ""}${ordinal(r.rank)} with ${firsts(r.firstPlaces)}`).join(", ") +
+            ".",
+        });
+      }
+      for (const rank of [...new Set(group.filter((r) => r.tied).map((r) => r.rank))]) {
+        const shared = group.filter((r) => r.rank === rank);
+        notes.push({
+          kind: "final-tie",
+          text: `${listNames(shared.map((r) => r.team.name))} are tied on ${pts(total)} and on ${firsts(shared[0].firstPlaces)}, so they share ${ordinal(rank)} place.`,
+        });
+      }
     }
   }
 

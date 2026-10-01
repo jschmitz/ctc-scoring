@@ -16,7 +16,8 @@ const SAMPLE_TEAM_COUNT = 8;
 
 type EventRow = Pick<Event, "id" | "current_round" | "status">;
 
-async function check<T>(op: PromiseLike<{ data: T; error: { message: string } | null }>): Promise<T> {
+/** Awaits a Supabase call and throws its error, so multi-step writes can use try/catch. */
+export async function check<T>(op: PromiseLike<{ data: T; error: { message: string } | null }>): Promise<T> {
   const { data, error } = await op;
   if (error) throw new Error(error.message);
   return data;

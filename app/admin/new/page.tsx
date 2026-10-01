@@ -16,7 +16,8 @@ export default async function NewEventPage() {
         </Link>
         <h1 className="mt-2 text-2xl font-semibold">New event</h1>
         <p className="mt-2 text-sm text-slate-600">
-          Start from an existing event to reuse its challenges and scoring rules, or start blank.
+          Start from the organizers&apos; scoring sheet (its teams and challenges), copy the challenges of an existing event, or
+          start blank.
         </p>
         <NewEventForm />
       </main>

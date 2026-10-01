@@ -89,11 +89,20 @@ describe("explanations", () => {
     ]);
   });
 
-  it("explains a shared place on the final total", () => {
+  it("explains a tie on the total settled by first-place finishes", () => {
+    expect(notes("tiebreak")).toContainEqual({
+      kind: "tiebreak",
+      text: "Red and Blue are tied on 7 points, so the tiebreaker (most first-place finishes) decides: Red 1st with 2 first-place finishes, Blue 2nd with 1 first-place finish.",
+    });
+    expect(notes("tiebreak").some((n) => n.kind === "final-tie")).toBe(false);
+  });
+
+  it("explains a place still shared after the tiebreaker", () => {
     expect(notes("final-tie")).toContainEqual({
       kind: "final-tie",
-      text: "Red and Green are tied on 7 points and share 1st place. No tiebreaker has been set yet.",
+      text: "Red and Green are tied on 7 points and on 1 first-place finish, so they share 1st place.",
     });
+    expect(notes("final-tie").some((n) => n.kind === "tiebreak")).toBe(false);
   });
 
   it("flags challenges that not every team has played", () => {

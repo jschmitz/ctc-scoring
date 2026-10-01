@@ -40,6 +40,7 @@ export function EventSetup({ eventId }: { eventId: string }) {
         <TeamsEditor {...props} />
         <ChallengesEditor {...props} />
         <StaffEditor {...props} />
+        <DeleteEvent {...props} />
       </main>
     </>
   );
@@ -454,6 +455,46 @@ function ChallengesEditor({ data, supabase, reload }: SectionProps) {
           + Add challenge
         </button>
       )}
+    </section>
+  );
+}
+
+/** Deletes the event and everything in it, after the name is typed to confirm. */
+function DeleteEvent({ data, supabase }: SectionProps) {
+  const router = useRouter();
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const confirmed = typed.trim() === data.event.name.trim();
+
+  async function remove() {
+    setBusy(true);
+    const { error } = await supabase.from("events").delete().eq("id", data.event.id);
+    if (error) {
+      window.alert(error.message);
+      setBusy(false);
+      return;
+    }
+    router.push("/admin");
+  }
+
+  return (
+    <section className={`${card} border-red-200`}>
+      <h2 className="text-lg font-semibold text-red-800">Delete event</h2>
+      <p className="mt-1 text-sm text-slate-600">
+        Permanently deletes this event with all {data.teams.length} teams, {data.challenges.length} challenges, the rotation and{" "}
+        {data.scores.length} scores. This can&apos;t be undone{data.event.is_simulation ? "" : ", so export the score table first if you need the results"}.
+      </p>
+      <label className="mt-3 block text-sm">
+        Type <span className="font-semibold">{data.event.name}</span> to confirm
+        <input value={typed} onChange={(e) => setTyped(e.target.value)} className={`${input} mt-1 block w-full max-w-md`} autoComplete="off" />
+      </label>
+      <button
+        className="mt-3 rounded-md bg-red-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-800 disabled:opacity-40"
+        disabled={!confirmed || busy}
+        onClick={remove}
+      >
+        {busy ? "Deleting…" : "Delete event"}
+      </button>
     </section>
   );
 }

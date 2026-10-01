@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CreateExampleButton } from "@/components/CreateExampleButton";
 import { EventList } from "@/components/EventList";
 import { SiteHeader } from "@/components/EventNav";
 import { NotStaff } from "@/components/NotStaff";
@@ -26,9 +27,12 @@ export default async function AdminPage() {
       <main className="mx-auto w-full max-w-3xl px-4 py-12">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-semibold">Events</h1>
-          <Link href="/admin/new" className={primaryButton}>
-            Create new event
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <CreateExampleButton />
+            <Link href="/admin/new" className={primaryButton}>
+              Create new event
+            </Link>
+          </div>
         </div>
         <p className="mt-2 text-sm text-slate-600">
           Signed in as {email}. <span className="font-medium">Simulate</span> copies an event and fills it with random scores so you

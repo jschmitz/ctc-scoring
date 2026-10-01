@@ -3,8 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { input, primaryButton } from "@/components/ui";
+import { populateFromScoringSheet, SHEET_CHALLENGES, SHEET_NAME, SHEET_TEAMS } from "@/lib/scoringSheet";
 import { createClient } from "@/lib/supabase/client";
 import type { Challenge, Event } from "@/lib/types";
+
+/** Select value for starting from the organizers' scoring sheet rather than another event. */
+const FROM_SHEET = "scoring-sheet";
 
 export function NewEventForm() {
   const supabase = useMemo(() => createClient(), []);
@@ -24,7 +28,7 @@ export function NewEventForm() {
       .order("event_date", { ascending: false })
       .then(({ data }) => {
         setEvents((data as Event[]) ?? []);
-        setCopyFrom(data?.[0]?.id ?? "");
+        setCopyFrom(FROM_SHEET);
       });
   }, [supabase]);
 
@@ -33,14 +37,24 @@ export function NewEventForm() {
     setBusy(true);
     setError(null);
     try {
+      const fromSheet = copyFrom === FROM_SHEET;
       const { data: event, error } = await supabase
         .from("events")
-        .insert({ name, event_date: date || null })
+        // The scoring sheet ranks challenges, so an event started from it uses enhanced scoring.
+        .insert({ name, event_date: date || null, ...(fromSheet ? { scoring_mode: "enhanced" } : {}) })
         .select()
         .single();
       if (error) throw error;
 
-      if (copyFrom) {
+      if (fromSheet) {
+        try {
+          await populateFromScoringSheet(supabase, event.id);
+        } catch (err) {
+          // Don't leave a half-filled event behind.
+          await supabase.from("events").delete().eq("id", event.id);
+          throw err;
+        }
+      } else if (copyFrom) {
         const { data: source, error: srcError } = await supabase
           .from("challenges")
           .select("*, scoring_components(*)")
@@ -79,6 +93,9 @@ export function NewEventForm() {
       <label className="block text-sm font-medium">
         Challenges
         <select value={copyFrom} onChange={(e) => setCopyFrom(e.target.value)} className={`${input} mt-1 w-full`}>
+          <option value={FROM_SHEET}>
+            Start from the {SHEET_NAME} ({SHEET_TEAMS.length} teams, {SHEET_CHALLENGES.length} challenges)
+          </option>
           {events.map((ev) => (
             <option key={ev.id} value={ev.id}>
               Copy from {ev.name}
@@ -87,6 +104,13 @@ export function NewEventForm() {
           <option value="">Start blank</option>
         </select>
       </label>
+      {copyFrom === FROM_SHEET && (
+        <p className="rounded-md bg-slate-100 px-3 py-2 text-sm text-slate-600">
+          Adds the scoring sheet&apos;s {SHEET_TEAMS.length} teams ({SHEET_TEAMS.map((t) => t.name).join(", ")}) and its{" "}
+          {SHEET_CHALLENGES.length} challenges ({SHEET_CHALLENGES.map((c) => c.name).join(", ")}) with their scoring notes, and turns
+          on enhanced scoring. There are no scores yet, as on the sheet. Rename teams, set up the rotation and add staff in Setup.
+        </p>
+      )}
       {error && <p className="text-sm text-red-700">{error}</p>}
       <button disabled={busy} className={primaryButton}>
         {busy ? "Creating…" : "Create event"}

@@ -67,3 +67,8 @@ Thumbs.db
 
 # personal Claude Code settings (shared ones like .claude/launch.json stay tracked)
 .claude/settings.local.json
+
+# Organizers' spreadsheets contain student names (PII) and the repo is public. Never commit them.
+*.xlsm
+*.xlsx
+*.xls

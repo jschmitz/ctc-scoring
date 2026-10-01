@@ -6,6 +6,8 @@
  * the same way, and they become both documentation and tests.
  */
 
+import { SCORING_SHEET_EXAMPLE } from "./scoringSheet";
+
 export type EnhancedExample = {
   id: string;
   title: string;
@@ -24,6 +26,7 @@ export type EnhancedExample = {
 };
 
 export const ENHANCED_EXAMPLES: EnhancedExample[] = [
+  SCORING_SHEET_EXAMPLE,
   {
     id: "basic",
     title: "Ranking one challenge",
@@ -81,10 +84,33 @@ export const ENHANCED_EXAMPLES: EnhancedExample[] = [
     ],
   },
   {
-    id: "final-tie",
-    title: "A tie on the final total",
+    id: "tiebreak",
+    title: "Tiebreak: most first-place finishes",
     explanation:
-      "Red and Green both finish with 7 points, so they share 1st place (no tiebreaker has been set yet). On raw totals Green (19) would be ahead of Red (17).",
+      "Red and Blue both finish with 7 points. Red won two challenges (Obstacle Course and Soccer Kick) and Blue won one (Pumpkin Toss), so Red takes 1st on the tiebreaker. On raw totals Blue (22) would beat Red (19).",
+    teams: ["Red", "Blue", "Green"],
+    challenges: ["Obstacle Course", "Soccer Kick", "Pumpkin Toss"],
+    scores: {
+      "Obstacle Course": { Red: 10, Blue: 8, Green: 5 },
+      "Soccer Kick": { Red: 6, Blue: 5, Green: 2 },
+      "Pumpkin Toss": { Red: 3, Blue: 9, Green: 7 },
+    },
+    expectedPoints: {
+      "Obstacle Course": { Red: 3, Blue: 2, Green: 1 },
+      "Soccer Kick": { Red: 3, Blue: 2, Green: 1 },
+      "Pumpkin Toss": { Red: 1, Blue: 3, Green: 2 },
+    },
+    expectedStandings: [
+      ["Red", 7, "1"],
+      ["Blue", 7, "2"],
+      ["Green", 4, "3"],
+    ],
+  },
+  {
+    id: "final-tie",
+    title: "Still tied after the tiebreaker",
+    explanation:
+      "Red and Green both finish with 7 points and each won one challenge (Red: Archery, Green: Buddy Rescue), so the tiebreaker can't separate them and they share 1st place. On raw totals Green (19) would be ahead of Red (17).",
     teams: ["Red", "Blue", "Green", "Yellow"],
     challenges: ["Archery", "Buddy Rescue"],
     scores: {
