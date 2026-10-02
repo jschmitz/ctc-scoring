@@ -84,6 +84,7 @@ export function ScoreTable({ eventId, staffEmail }: { eventId: string; staffEmai
             key={selection ? `${selection.teamId}:${selection.challengeId}` : "none"}
             data={data}
             selection={selection}
+            round={shownRound}
             staffEmail={staffEmail}
             supabase={supabase}
             onSelect={setSelection}

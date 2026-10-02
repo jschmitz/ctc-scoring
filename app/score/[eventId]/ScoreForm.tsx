@@ -12,6 +12,7 @@ type Selection = { teamId: string; challengeId: string };
 export function ScoreForm({
   data,
   selection,
+  round,
   staffEmail,
   supabase,
   onSelect,
@@ -19,6 +20,8 @@ export function ScoreForm({
 }: {
   data: EventData;
   selection: Selection | null;
+  /** The round shown in the table, for defaulting the Challenge field when a team is picked here. */
+  round: number;
   staffEmail: string;
   supabase: SupabaseClient;
   onSelect: (s: Selection | null) => void;
@@ -79,7 +82,14 @@ export function ScoreForm({
           <select
             className={selectClass}
             value={team?.id ?? ""}
-            onChange={(e) => onSelect({ teamId: e.target.value, challengeId: challenge?.id ?? data.challenges[0]?.id })}
+            onChange={(e) => {
+              const teamId = e.target.value;
+              // Default to this team's scheduled challenge for the shown round, but only when
+              // no challenge is picked yet — once one is, switching teams keeps it, so staff can
+              // walk a station through several teams without the field fighting them.
+              const scheduled = data.slots.find((s) => s.team_id === teamId && s.round_number === round)?.challenge_id;
+              onSelect({ teamId, challengeId: challenge?.id ?? scheduled ?? data.challenges[0]?.id });
+            }}
           >
             <option value="" disabled>
               Choose…
