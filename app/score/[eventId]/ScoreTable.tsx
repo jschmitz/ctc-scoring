@@ -12,8 +12,9 @@ type Selection = { teamId: string; challengeId: string };
 
 export function ScoreTable({ eventId, staffEmail }: { eventId: string; staffEmail: string }) {
   const { data, error, reload, supabase } = useEventData(eventId);
-  const [view, setView] = useState<"round" | "progress">("round");
+  const [view, setView] = useState<"round" | "activity" | "progress">("round");
   const [round, setRound] = useState<number | null>(null);
+  const [challengeId, setChallengeId] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
 
   if (error) return <p className="p-8 text-red-700">Couldn&apos;t load the event: {error}</p>;
@@ -21,6 +22,7 @@ export function ScoreTable({ eventId, staffEmail }: { eventId: string; staffEmai
 
   const rounds = roundCount(data.slots);
   const shownRound = round ?? data.event.current_round;
+  const shownChallengeId = challengeId ?? data.challenges[0]?.id ?? null;
 
   async function setCurrentRound(n: number) {
     await supabase.from("events").update({ current_round: n }).eq("id", eventId);
@@ -43,13 +45,13 @@ export function ScoreTable({ eventId, staffEmail }: { eventId: string; staffEmai
         <section>
           <div className="flex flex-wrap items-center gap-3">
             <div className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5 text-sm">
-              {(["round", "progress"] as const).map((v) => (
+              {(["round", "activity", "progress"] as const).map((v) => (
                 <button
                   key={v}
                   onClick={() => setView(v)}
                   className={`rounded-md px-3 py-1.5 ${view === v ? "bg-accent text-white" : "text-slate-600"}`}
                 >
-                  {v === "round" ? "By round" : "All scores"}
+                  {v === "round" ? "By round" : v === "activity" ? "By activity" : "All scores"}
                 </button>
               ))}
             </div>
@@ -72,6 +74,17 @@ export function ScoreTable({ eventId, staffEmail }: { eventId: string; staffEmai
                 setSelection(null);
               }}
               onSetCurrent={setCurrentRound}
+              onSelect={setSelection}
+            />
+          ) : view === "activity" ? (
+            <ActivityView
+              data={data}
+              challengeId={shownChallengeId}
+              selection={selection}
+              onChallenge={(id) => {
+                setChallengeId(id);
+                setSelection(null);
+              }}
               onSelect={setSelection}
             />
           ) : (
@@ -229,6 +242,96 @@ function RoundView({
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/** One challenge (station) across every round — for staff stationed at a single activity all event. */
+function ActivityView({
+  data,
+  challengeId,
+  selection,
+  onChallenge,
+  onSelect,
+}: {
+  data: EventData;
+  challengeId: string | null;
+  selection: Selection | null;
+  onChallenge: (id: string) => void;
+  onSelect: (s: Selection) => void;
+}) {
+  const challenges = data.challenges;
+  const idx = challenges.findIndex((c) => c.id === challengeId);
+  const challenge = challenges[idx] ?? challenges[0];
+  if (!challenge) {
+    return <p className="mt-6 rounded-lg border border-dashed border-slate-300 bg-white p-6 text-slate-600">No challenges yet.</p>;
+  }
+
+  const inRotation = data.slots.some((s) => s.challenge_id === challenge.id);
+  const rows = (
+    inRotation
+      ? data.slots
+          .filter((s) => s.challenge_id === challenge.id)
+          .map((slot) => ({ round: slot.round_number as number | null, team: data.teams.find((t) => t.id === slot.team_id)! }))
+          .sort((a, b) => a.round! - b.round! || a.team.number - b.team.number)
+      : // Not every challenge is a rotation station (e.g. Trivia) — list every team instead.
+        data.teams.map((team) => ({ round: null, team }))
+  ).map((row) => ({ ...row, score: data.scores.find((s) => s.team_id === row.team.id && s.challenge_id === challenge.id) }));
+  const done = rows.filter((r) => r.score).length;
+
+  return (
+    <div className="mt-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          disabled={idx <= 0}
+          onClick={() => onChallenge(challenges[idx - 1].id)}
+          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 disabled:opacity-40"
+          aria-label="Previous activity"
+        >
+          ◀
+        </button>
+        <h2 className="min-w-40 text-center text-xl font-semibold">{challenge.name}</h2>
+        <button
+          disabled={idx >= challenges.length - 1}
+          onClick={() => onChallenge(challenges[idx + 1].id)}
+          className="rounded-md border border-slate-300 bg-white px-3 py-1.5 disabled:opacity-40"
+          aria-label="Next activity"
+        >
+          ▶
+        </button>
+        <span className="ml-auto text-sm text-slate-500">
+          {done}/{rows.length} entered
+        </span>
+      </div>
+
+      {!inRotation && (
+        <p className="mt-2 text-sm text-slate-500">Not part of the rotation, so every team is listed here (by team number).</p>
+      )}
+
+      <ul className="mt-4 divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-white">
+        {rows.map(({ round, team, score }) => {
+          const selected = selection?.teamId === team.id && selection.challengeId === challenge.id;
+          return (
+            <li key={team.id}>
+              <button
+                onClick={() => onSelect({ teamId: team.id, challengeId: challenge.id })}
+                className={`flex w-full items-center gap-4 px-4 py-3 text-left hover:bg-slate-50 ${selected ? "bg-accent-soft" : ""}`}
+              >
+                {round !== null && <span className="w-16 text-slate-500">Round {round}</span>}
+                <span className="w-10 font-mono text-slate-500">#{team.number}</span>
+                <span className="flex-1">
+                  <TeamName team={team} className="font-medium" />
+                </span>
+                {score ? (
+                  <span className="rounded-full bg-green-100 px-2.5 py-1 text-sm font-medium text-green-800">{score.total} pts</span>
+                ) : (
+                  <span className="rounded-full bg-amber-100 px-2.5 py-1 text-sm text-amber-800">Pending</span>
+                )}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }
