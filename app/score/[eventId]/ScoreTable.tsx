@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { EventNav } from "@/components/EventNav";
 import { TeamName } from "@/components/TeamName";
 import { scoresToCsv } from "@/lib/csv";
@@ -12,7 +13,7 @@ type Selection = { teamId: string; challengeId: string };
 
 export function ScoreTable({ eventId, staffEmail }: { eventId: string; staffEmail: string }) {
   const { data, error, reload, supabase } = useEventData(eventId);
-  const [view, setView] = useState<"round" | "activity" | "progress">("round");
+  const [view, setView] = useState<"round" | "activity" | "table" | "progress">("round");
   const [round, setRound] = useState<number | null>(null);
   const [challengeId, setChallengeId] = useState<string | null>(null);
   const [selection, setSelection] = useState<Selection | null>(null);
@@ -41,17 +42,23 @@ export function ScoreTable({ eventId, staffEmail }: { eventId: string; staffEmai
   return (
     <>
       <EventNav eventId={eventId} eventName={data.event.name} active="score" simulation={data.event.is_simulation} />
-      <main className="mx-auto grid w-full max-w-6xl gap-6 px-4 py-6 lg:grid-cols-[1fr_420px]">
+      <main
+        className={
+          view === "table"
+            ? "mx-auto w-full max-w-6xl px-4 py-6"
+            : "mx-auto grid w-full max-w-6xl gap-6 px-4 py-6 lg:grid-cols-[1fr_420px]"
+        }
+      >
         <section>
           <div className="flex flex-wrap items-center gap-3">
             <div className="inline-flex rounded-lg border border-slate-300 bg-white p-0.5 text-sm">
-              {(["round", "activity", "progress"] as const).map((v) => (
+              {(["round", "activity", "table", "progress"] as const).map((v) => (
                 <button
                   key={v}
                   onClick={() => setView(v)}
                   className={`rounded-md px-3 py-1.5 ${view === v ? "bg-accent text-white" : "text-slate-600"}`}
                 >
-                  {v === "round" ? "By round" : v === "activity" ? "By activity" : "All scores"}
+                  {{ round: "By round", activity: "By activity", table: "Table entry", progress: "All scores" }[v]}
                 </button>
               ))}
             </div>
@@ -87,26 +94,30 @@ export function ScoreTable({ eventId, staffEmail }: { eventId: string; staffEmai
               }}
               onSelect={setSelection}
             />
+          ) : view === "table" ? (
+            <TableView data={data} supabase={supabase} reload={reload} />
           ) : (
             <ProgressView data={data} selection={selection} onSelect={setSelection} />
           )}
         </section>
 
-        <aside className="lg:sticky lg:top-4 lg:self-start">
-          <ScoreForm
-            key={selection ? `${selection.teamId}:${selection.challengeId}` : "none"}
-            data={data}
-            selection={selection}
-            round={shownRound}
-            staffEmail={staffEmail}
-            supabase={supabase}
-            onSelect={setSelection}
-            onSaved={async (saved) => {
-              await reload();
-              setSelection(nextPending(data, shownRound, saved));
-            }}
-          />
-        </aside>
+        {view !== "table" && (
+          <aside className="lg:sticky lg:top-4 lg:self-start">
+            <ScoreForm
+              key={selection ? `${selection.teamId}:${selection.challengeId}` : "none"}
+              data={data}
+              selection={selection}
+              round={shownRound}
+              staffEmail={staffEmail}
+              supabase={supabase}
+              onSelect={setSelection}
+              onSaved={async (saved) => {
+                await reload();
+                setSelection(nextPending(data, shownRound, saved));
+              }}
+            />
+          </aside>
+        )}
       </main>
     </>
   );
@@ -332,6 +343,102 @@ function ActivityView({
           );
         })}
       </ul>
+    </div>
+  );
+}
+
+/**
+ * Every team × every scoring component, as a spreadsheet: type a count, tab or click to
+ * the next cell, and it saves on blur (via save_score, same as the other views). A
+ * challenge with several components (Archery, Toss and Go) gets one column per
+ * component rather than a single ambiguous total.
+ */
+function TableView({ data, supabase, reload }: { data: EventData; supabase: SupabaseClient; reload: () => Promise<void> }) {
+  // Local edits, keyed "teamId:componentId", layered over the saved counts until a
+  // blur commits them — so mid-round realtime reloads don't clobber a half-typed row.
+  const [edits, setEdits] = useState<Record<string, number>>({});
+  const [error, setError] = useState<string | null>(null);
+
+  const scoreFor = (teamId: string, challengeId: string) => data.scores.find((s) => s.team_id === teamId && s.challenge_id === challengeId);
+  const countFor = (teamId: string, componentId: string, score?: ReturnType<typeof scoreFor>) => {
+    const key = `${teamId}:${componentId}`;
+    return key in edits ? edits[key] : (score?.score_components.find((c) => c.component_id === componentId)?.count ?? 0);
+  };
+
+  async function save(teamId: string, challenge: EventData["challenges"][number]) {
+    const keys = challenge.scoring_components.map((c) => `${teamId}:${c.id}`);
+    if (!keys.some((k) => k in edits)) return; // nothing changed in this challenge's row
+    const score = scoreFor(teamId, challenge.id);
+    const counts = Object.fromEntries(challenge.scoring_components.map((c) => [c.id, countFor(teamId, c.id, score)]));
+    const { error } = await supabase.rpc("save_score", { p_team_id: teamId, p_challenge_id: challenge.id, p_counts: counts, p_notes: score?.notes ?? "" });
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    setError(null);
+    setEdits((prev) => {
+      const next = { ...prev };
+      for (const k of keys) delete next[k];
+      return next;
+    });
+    await reload();
+  }
+
+  return (
+    <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white">
+      <table className="w-full text-sm">
+        <thead className="bg-slate-50 text-left text-slate-600">
+          <tr>
+            <th rowSpan={2} className="sticky left-0 z-10 bg-slate-50 px-3 py-2 align-bottom">
+              Team
+            </th>
+            {data.challenges.map((c) => (
+              <th key={c.id} colSpan={c.scoring_components.length} className="border-l border-slate-200 px-3 py-2 text-center font-medium">
+                {c.name}
+              </th>
+            ))}
+          </tr>
+          <tr>
+            {data.challenges.flatMap((c) =>
+              c.scoring_components.map((sc, i) => (
+                <th key={sc.id} className={`px-2 py-1 text-center text-xs font-normal whitespace-nowrap text-slate-500 ${i === 0 ? "border-l border-slate-200" : ""}`}>
+                  {sc.label} <span className="text-slate-400">({sc.points}pt)</span>
+                </th>
+              )),
+            )}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {data.teams.map((t) => (
+            <tr key={t.id}>
+              <td className="sticky left-0 z-10 whitespace-nowrap bg-white px-3 py-2">
+                <span className="font-mono text-slate-500">#{t.number}</span> <TeamName team={t} />
+              </td>
+              {data.challenges.flatMap((c) => {
+                const score = scoreFor(t.id, c.id);
+                return c.scoring_components.map((sc, i) => (
+                  <td key={sc.id} className={`p-1 ${i === 0 ? "border-l border-slate-200" : ""}`}>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      min={0}
+                      value={countFor(t.id, sc.id, score)}
+                      onFocus={(e) => e.target.select()}
+                      onChange={(e) =>
+                        setEdits((prev) => ({ ...prev, [`${t.id}:${sc.id}`]: Math.max(0, Math.floor(e.target.valueAsNumber || 0)) }))
+                      }
+                      onBlur={() => save(t.id, c)}
+                      className="w-16 rounded-md border border-slate-200 px-2 py-1 text-center tabular-nums focus:border-accent focus:ring-1 focus:ring-accent"
+                      aria-label={`${t.name}, ${c.name}, ${sc.label}`}
+                    />
+                  </td>
+                ));
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {error && <p className="border-t border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
     </div>
   );
 }
