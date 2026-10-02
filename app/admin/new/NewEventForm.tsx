@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { input, primaryButton } from "@/components/ui";
-import { populateFromScoringSheet, SHEET_CHALLENGES, SHEET_NAME, SHEET_TEAMS } from "@/lib/scoringSheet";
+import { applySheetRotation, populateFromScoringSheet, SHEET_CHALLENGES, SHEET_NAME, SHEET_TEAMS } from "@/lib/scoringSheet";
 import { createClient } from "@/lib/supabase/client";
 import type { Challenge, Event } from "@/lib/types";
 
@@ -48,7 +48,8 @@ export function NewEventForm() {
 
       if (fromSheet) {
         try {
-          await populateFromScoringSheet(supabase, event.id);
+          const { challengeIds, teamIds } = await populateFromScoringSheet(supabase, event.id);
+          await applySheetRotation(supabase, event.id, challengeIds, teamIds);
         } catch (err) {
           // Don't leave a half-filled event behind.
           await supabase.from("events").delete().eq("id", event.id);
@@ -108,7 +109,9 @@ export function NewEventForm() {
         <p className="rounded-md bg-slate-100 px-3 py-2 text-sm text-slate-600">
           Adds the scoring sheet&apos;s {SHEET_TEAMS.length} teams ({SHEET_TEAMS.map((t) => t.name).join(", ")}) and its{" "}
           {SHEET_CHALLENGES.length} challenges ({SHEET_CHALLENGES.map((c) => c.name).join(", ")}) with their scoring notes, and turns
-          on enhanced scoring. There are no scores yet, as on the sheet. Rename teams, set up the rotation and add staff in Setup.
+          on enhanced scoring. There are no scores yet, as on the sheet. Also fills in the printed rotation (2 teams per station, 6
+          rounds; Trivia isn&apos;t a station, so it&apos;s scored on its own) — double-check it in Setup → Edit rotation against the
+          original schedule before the event. Rename teams and add staff in Setup.
         </p>
       )}
       {error && <p className="text-sm text-red-700">{error}</p>}

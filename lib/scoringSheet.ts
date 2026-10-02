@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { EnhancedExample } from "./enhancedScoring.examples";
-import { generateRotation, roundCount } from "./rotation";
+import { generateRotation, roundCount, type RotationSlot } from "./rotation";
 import { check } from "./simulation";
 
 /**
@@ -112,6 +112,100 @@ export async function populateFromScoringSheet(supabase: SupabaseClient, eventId
       .select(),
   )) as { id: string; name: string }[];
   return { challengeIds, componentIds, teamIds: new Map(teams.map((t) => [t.name, t.id])) };
+}
+
+// ── The organizers' printed rotation ────────────────────────────────────────────────
+
+/**
+ * The rotation from the organizers' printed "Crusader Team Challenge" schedule: two
+ * teams per station, two per round, six 15-minute rounds (5:45–7:10, not stored here —
+ * there's no clock-time field, only round number). Trivia isn't a physical station, so
+ * it's left out and scored on its own.
+ *
+ * Transcribed by hand from a photo of the schedule, not generated. It's internally
+ * consistent (each team visits each of these 6 challenges exactly once, and shares
+ * exactly one round with every other team), but double-check it against the original
+ * schedule in Setup → Edit rotation before relying on it for an actual event.
+ */
+const FIXED_ROTATION: Record<number, Partial<Record<SheetChallenge, [SheetTeam, SheetTeam]>>> = {
+  1: {
+    "Obstacle Course": ["Orange", "White"],
+    "Buddy Rescue": ["Red", "Grey"],
+    "Toss and Go": ["Purple", "Lavender"],
+    Archery: ["Royal Blue", "Light Blue"],
+    "Soccer Kick": ["Green", "Gold"],
+    "Pumpkin Toss": ["Pink", "Navy"],
+  },
+  2: {
+    "Obstacle Course": ["Pink", "Grey"],
+    "Buddy Rescue": ["Orange", "Lavender"],
+    "Toss and Go": ["Red", "Light Blue"],
+    Archery: ["Purple", "Gold"],
+    "Soccer Kick": ["Navy", "White"],
+    "Pumpkin Toss": ["Green", "Royal Blue"],
+  },
+  3: {
+    "Obstacle Course": ["Green", "Lavender"],
+    "Buddy Rescue": ["Pink", "Light Blue"],
+    "Toss and Go": ["Orange", "Gold"],
+    Archery: ["Red", "Navy"],
+    "Soccer Kick": ["Royal Blue", "Grey"],
+    "Pumpkin Toss": ["White", "Purple"],
+  },
+  4: {
+    "Obstacle Course": ["Royal Blue", "Gold"],
+    "Buddy Rescue": ["Green", "Navy"],
+    "Toss and Go": ["Pink", "White"],
+    Archery: ["Lavender", "Grey"],
+    "Soccer Kick": ["Purple", "Light Blue"],
+    "Pumpkin Toss": ["Orange", "Red"],
+  },
+  5: {
+    "Obstacle Course": ["Purple", "Navy"],
+    "Buddy Rescue": ["Royal Blue", "White"],
+    "Toss and Go": ["Green", "Grey"],
+    Archery: ["Orange", "Pink"],
+    "Soccer Kick": ["Red", "Lavender"],
+    "Pumpkin Toss": ["Gold", "Light Blue"],
+  },
+  6: {
+    "Obstacle Course": ["Red", "Light Blue"],
+    "Buddy Rescue": ["Purple", "Gold"],
+    "Toss and Go": ["Royal Blue", "Navy"],
+    Archery: ["White", "Green"],
+    "Soccer Kick": ["Pink", "Orange"],
+    "Pumpkin Toss": ["Grey", "Lavender"],
+  },
+};
+
+/** Turns FIXED_ROTATION into RotationSlot rows using the ids from populateFromScoringSheet. */
+export function fixedRotationSlots(challengeIds: Map<string, string>, teamIds: Map<string, string>): RotationSlot[] {
+  const slots: RotationSlot[] = [];
+  for (const [round, byChallenge] of Object.entries(FIXED_ROTATION)) {
+    for (const [challengeName, teams] of Object.entries(byChallenge)) {
+      const challengeId = challengeIds.get(challengeName);
+      if (!challengeId) continue;
+      for (const teamName of teams) {
+        const teamId = teamIds.get(teamName);
+        if (teamId) slots.push({ round_number: Number(round), team_id: teamId, challenge_id: challengeId });
+      }
+    }
+  }
+  return slots;
+}
+
+/**
+ * Sets up the printed rotation on a freshly-populated event: two teams per station,
+ * and the FIXED_ROTATION slots in place of the empty rotation a new event starts with.
+ */
+export async function applySheetRotation(
+  supabase: SupabaseClient,
+  eventId: string,
+  challengeIds: Map<string, string>,
+  teamIds: Map<string, string>,
+) {
+  await check(supabase.from("events").update({ teams_per_station: 2 }).eq("id", eventId));
+  await check(supabase.rpc("replace_rotation", { p_event_id: eventId, p_slots: fixedRotationSlots(challengeIds, teamIds) }));
 }
 
 // ── The scoring-sheet example ──────────────────────────────────────────────────────
