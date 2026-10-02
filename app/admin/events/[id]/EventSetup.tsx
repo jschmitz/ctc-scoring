@@ -7,7 +7,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { EventNav } from "@/components/EventNav";
 import { card, input, primaryButton, secondaryButton } from "@/components/ui";
 import { TeamColorPicker } from "@/components/TeamColorPicker";
-import { generateRotation, roundCount } from "@/lib/rotation";
+import { TeamName } from "@/components/TeamName";
+import { assignSlot, generateRotation, rotationIssues, roundCount, type RotationSlot } from "@/lib/rotation";
 import { deleteSimulation, finishSimulation, playNextRound, restartSimulation } from "@/lib/simulation";
 import { nextColors, TEAM_COLORS } from "@/lib/teamColors";
 import type { EventStatus } from "@/lib/types";
@@ -202,6 +203,7 @@ function EventSettings({ data, supabase, reload }: SectionProps) {
 
 function RotationPanel({ data, supabase, reload }: SectionProps) {
   const { event, teams, challenges, slots } = data;
+  const [editing, setEditing] = useState(false);
   const locked = event.status !== "setup";
   const preview = generateRotation(
     teams.map((t) => t.id),
@@ -228,16 +230,141 @@ function RotationPanel({ data, supabase, reload }: SectionProps) {
           Teams or challenges changed since the rotation was generated. Regenerate it.
         </p>
       )}
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        <button onClick={save} disabled={locked || preview.length === 0} className={primaryButton}>
-          {slots.length > 0 ? "Regenerate rotation" : "Generate rotation"}
-        </button>
-        <a href={`/event/${event.id}/schedule`} className={secondaryButton}>
-          View schedule
-        </a>
-        {locked && <span className="text-sm text-slate-500">Locked: set the status back to Setup to change it.</span>}
-      </div>
+      {editing && !locked ? (
+        <RotationEditor key={slots.map((s) => s.id).join()} data={data} supabase={supabase} reload={reload} onDone={() => setEditing(false)} />
+      ) : (
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <button onClick={save} disabled={locked || preview.length === 0} className={primaryButton}>
+            {slots.length > 0 ? "Regenerate rotation" : "Generate rotation"}
+          </button>
+          <button onClick={() => setEditing(true)} disabled={locked || slots.length === 0} className={secondaryButton}>
+            Edit rotation
+          </button>
+          <a href={`/event/${event.id}/schedule`} className={secondaryButton}>
+            View schedule
+          </a>
+          {locked && <span className="text-sm text-slate-500">Locked: set the status back to Setup to change it.</span>}
+        </div>
+      )}
     </section>
+  );
+}
+
+/**
+ * Hand edits to a saved rotation: one dropdown per team per round. Picking a challenge the
+ * team already has in another round swaps the two, so no team ever repeats a challenge.
+ */
+function RotationEditor({ data, supabase, reload, onDone }: SectionProps & { onDone: () => void }) {
+  const { event, teams, challenges } = data;
+  const [draft, setDraft] = useState<RotationSlot[]>(() =>
+    data.slots.map(({ round_number, team_id, challenge_id }) => ({ round_number, team_id, challenge_id })),
+  );
+  const [rounds, setRounds] = useState(() => roundCount(data.slots));
+  const [saving, setSaving] = useState(false);
+  const issues = rotationIssues(
+    draft,
+    teams.map((t) => t.id),
+    challenges.map((c) => c.id),
+    event.teams_per_station,
+  );
+  const challengeName = (id: string) => challenges.find((c) => c.id === id)?.name ?? "?";
+  const used = roundCount(draft);
+
+  async function save() {
+    const problems = issues.overloaded.size + issues.missing.size;
+    if (problems > 0 && !window.confirm("This rotation has problems (highlighted). Save it anyway?")) return;
+    setSaving(true);
+    const { error } = await supabase.rpc("replace_rotation", { p_event_id: event.id, p_slots: draft });
+    setSaving(false);
+    if (error) {
+      window.alert(error.message);
+      return;
+    }
+    await reload();
+    onDone();
+  }
+
+  return (
+    <div className="mt-4">
+      <div className="overflow-x-auto">
+        <table className="text-sm">
+          <thead className="text-left text-slate-500">
+            <tr>
+              <th className="sticky left-0 bg-white pb-2 pr-3 font-medium">Team</th>
+              {Array.from({ length: rounds }, (_, i) => (
+                <th key={i} className="pb-2 pr-2 font-medium">
+                  Round {i + 1}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {teams.map((t) => (
+              <tr key={t.id}>
+                <td className={`sticky left-0 whitespace-nowrap bg-white py-1 pr-3 ${issues.missing.has(t.id) ? "text-amber-700" : ""}`}>
+                  <TeamName team={t} />
+                </td>
+                {Array.from({ length: rounds }, (_, i) => {
+                  const round = i + 1;
+                  const value = draft.find((s) => s.team_id === t.id && s.round_number === round)?.challenge_id ?? "";
+                  const crowded = value && issues.overloaded.has(`${round}:${value}`);
+                  return (
+                    <td key={round} className="py-1 pr-2">
+                      <select
+                        aria-label={`${t.name}, round ${round}`}
+                        className={`${input} w-36 ${crowded ? "ring-2 ring-amber-500" : ""} ${value ? "" : "text-slate-400"}`}
+                        value={value}
+                        onChange={(e) => setDraft(assignSlot(draft, t.id, round, e.target.value || null))}
+                      >
+                        <option value="">— rest —</option>
+                        {challenges.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.position}. {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {(issues.overloaded.size > 0 || issues.missing.size > 0) && (
+        <ul className="mt-3 space-y-1 rounded-md bg-amber-50 p-2.5 text-sm text-amber-900">
+          {[...issues.overloaded].map((key) => {
+            const [round, challengeId] = key.split(":");
+            return (
+              <li key={key}>
+                Round {round}: too many teams at {challengeName(challengeId)} (max {event.teams_per_station}).
+              </li>
+            );
+          })}
+          {[...issues.missing].map(([teamId, gaps]) => (
+            <li key={teamId}>
+              {teams.find((t) => t.id === teamId)?.name} never visits {gaps.map(challengeName).join(", ")}.
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <button onClick={save} disabled={saving} className={primaryButton}>
+          Save rotation
+        </button>
+        <button onClick={onDone} disabled={saving} className={secondaryButton}>
+          Cancel
+        </button>
+        <button onClick={() => setRounds(rounds + 1)} className={secondaryButton}>
+          Add round
+        </button>
+        <button onClick={() => setRounds(rounds - 1)} disabled={rounds <= Math.max(1, used)} className={secondaryButton}>
+          Remove last round
+        </button>
+      </div>
+    </div>
   );
 }
 
