@@ -76,6 +76,8 @@ export function ScoreTable({ eventId, staffEmail }: { eventId: string; staffEmai
               round={shownRound}
               rounds={rounds}
               selection={selection}
+              supabase={supabase}
+              reload={reload}
               onRound={(n) => {
                 setRound(n);
                 setSelection(null);
@@ -135,11 +137,95 @@ function nextPending(data: EventData, round: number, saved: Selection): Selectio
   return next ? { teamId: next.slot.team_id, challengeId: next.slot.challenge_id } : null;
 }
 
+/**
+ * Local edits for score cells, layered over the saved counts until a blur (or a tab
+ * switch, which blurs the field first) commits them with save_score — so a quick batch
+ * of entries can be typed straight in, and a realtime reload from someone else's save
+ * mid-entry doesn't clobber a field still being typed. Shared by RoundView and TableView.
+ */
+function useInlineScores(data: EventData, supabase: SupabaseClient, reload: () => Promise<void>) {
+  const [edits, setEdits] = useState<Record<string, number>>({});
+  const [error, setError] = useState<string | null>(null);
+
+  const scoreFor = (teamId: string, challengeId: string) => data.scores.find((s) => s.team_id === teamId && s.challenge_id === challengeId);
+  const countFor = (teamId: string, challengeId: string, componentId: string) => {
+    const key = `${teamId}:${componentId}`;
+    if (key in edits) return edits[key];
+    return scoreFor(teamId, challengeId)?.score_components.find((c) => c.component_id === componentId)?.count ?? 0;
+  };
+  const setCount = (teamId: string, componentId: string, value: number) =>
+    setEdits((prev) => ({ ...prev, [`${teamId}:${componentId}`]: Math.max(0, Math.floor(value || 0)) }));
+
+  async function save(teamId: string, challenge: EventData["challenges"][number]) {
+    const keys = challenge.scoring_components.map((c) => `${teamId}:${c.id}`);
+    if (!keys.some((k) => k in edits)) return; // nothing changed in this challenge's row
+    const counts = Object.fromEntries(challenge.scoring_components.map((c) => [c.id, countFor(teamId, challenge.id, c.id)]));
+    const { error } = await supabase.rpc("save_score", {
+      p_team_id: teamId,
+      p_challenge_id: challenge.id,
+      p_counts: counts,
+      p_notes: scoreFor(teamId, challenge.id)?.notes ?? "",
+    });
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    setError(null);
+    setEdits((prev) => {
+      const next = { ...prev };
+      for (const k of keys) delete next[k];
+      return next;
+    });
+    await reload();
+  }
+
+  return { scoreFor, countFor, setCount, save, error };
+}
+
+/** Number inputs for one challenge's components, inline — the fast-entry half of a row. */
+function InlineCounts({
+  team,
+  challenge,
+  countFor,
+  setCount,
+  save,
+}: {
+  team: EventData["teams"][number];
+  challenge: EventData["challenges"][number];
+  countFor: ReturnType<typeof useInlineScores>["countFor"];
+  setCount: ReturnType<typeof useInlineScores>["setCount"];
+  save: ReturnType<typeof useInlineScores>["save"];
+}) {
+  const multi = challenge.scoring_components.length > 1;
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+      {challenge.scoring_components.map((sc) => (
+        <label key={sc.id} className="flex items-center gap-1 text-xs text-slate-500">
+          {multi && <span className="hidden sm:inline">{sc.label}</span>}
+          <input
+            type="number"
+            inputMode="numeric"
+            min={0}
+            value={countFor(team.id, challenge.id, sc.id)}
+            onFocus={(e) => e.target.select()}
+            onChange={(e) => setCount(team.id, sc.id, e.target.valueAsNumber)}
+            onBlur={() => save(team.id, challenge)}
+            aria-label={`${team.name}, ${challenge.name}, ${sc.label}`}
+            className="w-14 rounded-md border border-slate-300 px-1.5 py-1 text-center text-sm tabular-nums focus:border-accent focus:ring-1 focus:ring-accent"
+          />
+        </label>
+      ))}
+    </div>
+  );
+}
+
 function RoundView({
   data,
   round,
   rounds,
   selection,
+  supabase,
+  reload,
   onRound,
   onSetCurrent,
   onSelect,
@@ -148,10 +234,13 @@ function RoundView({
   round: number;
   rounds: number;
   selection: Selection | null;
+  supabase: SupabaseClient;
+  reload: () => Promise<void>;
   onRound: (n: number) => void;
   onSetCurrent: (n: number) => void;
   onSelect: (s: Selection) => void;
 }) {
+  const { countFor, setCount, save, error } = useInlineScores(data, supabase, reload);
   if (rounds === 0) {
     return (
       <p className="mt-6 rounded-lg border border-dashed border-slate-300 bg-white p-6 text-slate-600">
@@ -211,26 +300,30 @@ function RoundView({
         {rows.map(({ slot, team, challenge, score }) => {
           const selected = selection?.teamId === slot.team_id && selection.challengeId === slot.challenge_id;
           return (
-            <li key={slot.id}>
+            <li key={slot.id} className={`flex items-center gap-3 px-4 py-2 ${selected ? "bg-accent-soft" : "hover:bg-slate-50"}`}>
               <button
+                type="button"
                 onClick={() => onSelect({ teamId: slot.team_id, challengeId: slot.challenge_id })}
-                className={`flex w-full items-center gap-4 px-4 py-3 text-left hover:bg-slate-50 ${selected ? "bg-accent-soft" : ""}`}
+                className="flex flex-1 items-center gap-4 text-left"
+                title="Open in the full form (description, notes)"
               >
                 <span className="w-10 font-mono text-slate-500">#{team.number}</span>
                 <span className="flex-1">
                   <TeamName team={team} className="font-medium" />
                   <span className="block text-sm text-slate-500">{challenge.name}</span>
                 </span>
-                {score ? (
-                  <span className="rounded-full bg-green-100 px-2.5 py-1 text-sm font-medium text-green-800">{score.total} pts</span>
-                ) : (
-                  <span className="rounded-full bg-amber-100 px-2.5 py-1 text-sm text-amber-800">Pending</span>
-                )}
               </button>
+              <InlineCounts team={team} challenge={challenge} countFor={countFor} setCount={setCount} save={save} />
+              {score ? (
+                <span className="rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-800">{score.total} pts</span>
+              ) : (
+                <span className="rounded-full bg-amber-100 px-2 py-1 text-xs text-amber-800">Pending</span>
+              )}
             </li>
           );
         })}
       </ul>
+      {error && <p className="mt-2 text-sm text-red-700">{error}</p>}
       {resting.length > 0 && (
         <p className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-500">
           Resting this round:
@@ -354,35 +447,7 @@ function ActivityView({
  * component rather than a single ambiguous total.
  */
 function TableView({ data, supabase, reload }: { data: EventData; supabase: SupabaseClient; reload: () => Promise<void> }) {
-  // Local edits, keyed "teamId:componentId", layered over the saved counts until a
-  // blur commits them — so mid-round realtime reloads don't clobber a half-typed row.
-  const [edits, setEdits] = useState<Record<string, number>>({});
-  const [error, setError] = useState<string | null>(null);
-
-  const scoreFor = (teamId: string, challengeId: string) => data.scores.find((s) => s.team_id === teamId && s.challenge_id === challengeId);
-  const countFor = (teamId: string, componentId: string, score?: ReturnType<typeof scoreFor>) => {
-    const key = `${teamId}:${componentId}`;
-    return key in edits ? edits[key] : (score?.score_components.find((c) => c.component_id === componentId)?.count ?? 0);
-  };
-
-  async function save(teamId: string, challenge: EventData["challenges"][number]) {
-    const keys = challenge.scoring_components.map((c) => `${teamId}:${c.id}`);
-    if (!keys.some((k) => k in edits)) return; // nothing changed in this challenge's row
-    const score = scoreFor(teamId, challenge.id);
-    const counts = Object.fromEntries(challenge.scoring_components.map((c) => [c.id, countFor(teamId, c.id, score)]));
-    const { error } = await supabase.rpc("save_score", { p_team_id: teamId, p_challenge_id: challenge.id, p_counts: counts, p_notes: score?.notes ?? "" });
-    if (error) {
-      setError(error.message);
-      return;
-    }
-    setError(null);
-    setEdits((prev) => {
-      const next = { ...prev };
-      for (const k of keys) delete next[k];
-      return next;
-    });
-    await reload();
-  }
+  const { countFor, setCount, save, error } = useInlineScores(data, supabase, reload);
 
   return (
     <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white">
@@ -414,26 +479,23 @@ function TableView({ data, supabase, reload }: { data: EventData; supabase: Supa
               <td className="sticky left-0 z-10 whitespace-nowrap bg-white px-3 py-2">
                 <span className="font-mono text-slate-500">#{t.number}</span> <TeamName team={t} />
               </td>
-              {data.challenges.flatMap((c) => {
-                const score = scoreFor(t.id, c.id);
-                return c.scoring_components.map((sc, i) => (
+              {data.challenges.flatMap((c) =>
+                c.scoring_components.map((sc, i) => (
                   <td key={sc.id} className={`p-1 ${i === 0 ? "border-l border-slate-200" : ""}`}>
                     <input
                       type="number"
                       inputMode="numeric"
                       min={0}
-                      value={countFor(t.id, sc.id, score)}
+                      value={countFor(t.id, c.id, sc.id)}
                       onFocus={(e) => e.target.select()}
-                      onChange={(e) =>
-                        setEdits((prev) => ({ ...prev, [`${t.id}:${sc.id}`]: Math.max(0, Math.floor(e.target.valueAsNumber || 0)) }))
-                      }
+                      onChange={(e) => setCount(t.id, sc.id, e.target.valueAsNumber)}
                       onBlur={() => save(t.id, c)}
                       className="w-16 rounded-md border border-slate-200 px-2 py-1 text-center tabular-nums focus:border-accent focus:ring-1 focus:ring-accent"
                       aria-label={`${t.name}, ${c.name}, ${sc.label}`}
                     />
                   </td>
-                ));
-              })}
+                )),
+              )}
             </tr>
           ))}
         </tbody>
