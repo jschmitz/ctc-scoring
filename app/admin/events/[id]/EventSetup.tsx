@@ -230,6 +230,12 @@ function RotationPanel({ data, supabase, reload }: SectionProps) {
           Teams or challenges changed since the rotation was generated. Regenerate it.
         </p>
       )}
+      {!locked && slots.length > 0 && (
+        <p className="mt-2 rounded-md bg-amber-50 p-2.5 text-sm text-amber-900">
+          Before the event: get the printed rotation schedule and confirm it matches this one, round by round —
+          the app only stores round numbers, not clock times. Fix anything with <b>Edit rotation</b> below.
+        </p>
+      )}
       {editing && !locked ? (
         <RotationEditor key={slots.map((s) => s.id).join()} data={data} supabase={supabase} reload={reload} onDone={() => setEditing(false)} />
       ) : (
