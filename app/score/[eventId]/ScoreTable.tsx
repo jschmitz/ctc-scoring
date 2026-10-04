@@ -139,9 +139,10 @@ function nextPending(data: EventData, round: number, saved: Selection): Selectio
 
 /**
  * Local edits for score cells, layered over the saved counts until a blur (or a tab
- * switch, which blurs the field first) commits them with save_score — so a quick batch
- * of entries can be typed straight in, and a realtime reload from someone else's save
- * mid-entry doesn't clobber a field still being typed. Shared by RoundView and TableView.
+ * switch, which blurs the field first) commits them with save_score_component — one
+ * field at a time, so two staff editing different components of the same team+challenge
+ * never race each other, and a realtime reload from someone else's save mid-entry
+ * doesn't clobber a field still being typed. Shared by RoundView and TableView.
  */
 function useInlineScores(data: EventData, supabase: SupabaseClient, reload: () => Promise<void>) {
   const [edits, setEdits] = useState<Record<string, number>>({});
@@ -156,15 +157,17 @@ function useInlineScores(data: EventData, supabase: SupabaseClient, reload: () =
   const setCount = (teamId: string, componentId: string, value: number) =>
     setEdits((prev) => ({ ...prev, [`${teamId}:${componentId}`]: Math.max(0, Math.floor(value || 0)) }));
 
-  async function save(teamId: string, challenge: EventData["challenges"][number]) {
-    const keys = challenge.scoring_components.map((c) => `${teamId}:${c.id}`);
-    if (!keys.some((k) => k in edits)) return; // nothing changed in this challenge's row
-    const counts = Object.fromEntries(challenge.scoring_components.map((c) => [c.id, countFor(teamId, challenge.id, c.id)]));
-    const { error } = await supabase.rpc("save_score", {
+  // Saves just the one component that changed, via save_score_component — not the
+  // challenge's other components, so another staffer editing one of those at the same
+  // moment (same team+challenge, different field) can never be overwritten by this call.
+  async function save(teamId: string, challenge: EventData["challenges"][number], componentId: string) {
+    const key = `${teamId}:${componentId}`;
+    if (!(key in edits)) return; // nothing changed in this cell
+    const { error } = await supabase.rpc("save_score_component", {
       p_team_id: teamId,
       p_challenge_id: challenge.id,
-      p_counts: counts,
-      p_notes: scoreFor(teamId, challenge.id)?.notes ?? "",
+      p_component_id: componentId,
+      p_count: edits[key],
     });
     if (error) {
       setError(error.message);
@@ -173,7 +176,7 @@ function useInlineScores(data: EventData, supabase: SupabaseClient, reload: () =
     setError(null);
     setEdits((prev) => {
       const next = { ...prev };
-      for (const k of keys) delete next[k];
+      delete next[key];
       return next;
     });
     await reload();
@@ -209,7 +212,7 @@ function InlineCounts({
             value={countFor(team.id, challenge.id, sc.id)}
             onFocus={(e) => e.target.select()}
             onChange={(e) => setCount(team.id, sc.id, e.target.valueAsNumber)}
-            onBlur={() => save(team.id, challenge)}
+            onBlur={() => save(team.id, challenge, sc.id)}
             aria-label={`${team.name}, ${challenge.name}, ${sc.label}`}
             className="w-14 rounded-md border border-slate-300 px-1.5 py-1 text-center text-sm tabular-nums focus:border-accent focus:ring-1 focus:ring-accent"
           />
@@ -489,7 +492,7 @@ function TableView({ data, supabase, reload }: { data: EventData; supabase: Supa
                       value={countFor(t.id, c.id, sc.id)}
                       onFocus={(e) => e.target.select()}
                       onChange={(e) => setCount(t.id, sc.id, e.target.valueAsNumber)}
-                      onBlur={() => save(t.id, c)}
+                      onBlur={() => save(t.id, c, sc.id)}
                       className="w-16 rounded-md border border-slate-200 px-2 py-1 text-center tabular-nums focus:border-accent focus:ring-1 focus:ring-accent"
                       aria-label={`${t.name}, ${c.name}, ${sc.label}`}
                     />

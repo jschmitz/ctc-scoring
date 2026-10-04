@@ -61,14 +61,19 @@ export function ScoreForm({
     }
     setSaving(true);
     setError(null);
-    const { error } = await supabase.rpc("save_score", {
-      p_team_id: team.id,
-      p_challenge_id: challenge.id,
-      p_counts: Object.fromEntries(components.map((c) => [c.id, counts[c.id] ?? 0])),
-      p_notes: notes,
-    });
+    // One call per field (save_score_component for each count, set_score_notes for the
+    // notes) rather than one call replacing the whole score — so another staffer editing
+    // a different component of this same team+challenge at the same time never gets
+    // overwritten by this save.
+    const results = await Promise.all([
+      ...components.map((c) =>
+        supabase.rpc("save_score_component", { p_team_id: team.id, p_challenge_id: challenge.id, p_component_id: c.id, p_count: counts[c.id] ?? 0 }),
+      ),
+      supabase.rpc("set_score_notes", { p_team_id: team.id, p_challenge_id: challenge.id, p_notes: notes }),
+    ]);
     setSaving(false);
-    if (error) setError(error.message);
+    const failed = results.find((r) => r.error);
+    if (failed?.error) setError(failed.error.message);
     else onSaved({ teamId: team.id, challengeId: challenge.id });
   }
 
